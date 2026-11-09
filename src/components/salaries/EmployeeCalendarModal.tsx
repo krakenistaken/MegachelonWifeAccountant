@@ -80,6 +80,15 @@ export default function EmployeeCalendarModal({
   const [savingDay, setSavingDay] = useState(false);
   const [daySuccessMessage, setDaySuccessMessage] = useState('');
 
+  // Multi-select state
+  const [isMultiSelectMode, setIsMultiSelectMode] = useState(false);
+  const [selectedDates, setSelectedDates] = useState<string[]>([]);
+  const [bulkStatus, setBulkStatus] = useState<'Geldi' | 'Mesai' | 'Gelmedi' | 'Boş'>('Geldi');
+  const [bulkWorkHours, setBulkWorkHours] = useState<number>(11);
+  const [bulkPaymentMode, setBulkPaymentMode] = useState<'unpaid' | 'full'>('unpaid');
+  const [bulkAccountId, setBulkAccountId] = useState<string>('');
+  const [savingBulk, setSavingBulk] = useState(false);
+
   // Inline day edit form state
   const [dayForm, setDayForm] = useState<{
     status: 'Geldi' | 'Mesai' | 'Gelmedi' | 'Boş';
@@ -346,6 +355,83 @@ export default function EmployeeCalendarModal({
     }
   };
 
+  // Bulk Save Handler
+  const handleSaveBulk = async () => {
+    if (selectedDates.length === 0) return;
+    setSavingBulk(true);
+    try {
+      const hourlyRate = employee.daily_wage > 0 ? employee.daily_wage / 11 : 0;
+      let hrs = bulkWorkHours;
+      let wage = 0;
+      if (bulkStatus === 'Geldi') {
+        wage = Math.round(hrs * hourlyRate * 100) / 100;
+      } else if (bulkStatus === 'Mesai') {
+        wage = Math.round(hrs * (hourlyRate * 1.5) * 100) / 100;
+      } else if (bulkStatus === 'Gelmedi' || bulkStatus === 'Boş') {
+        hrs = 0;
+        wage = 0;
+      }
+
+      let paidAmt = 0;
+      if (bulkPaymentMode === 'full' && (bulkStatus === 'Geldi' || bulkStatus === 'Mesai')) {
+        paidAmt = wage;
+      }
+
+      for (const d of selectedDates) {
+        await fetch('/api/salaries/attendance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            date: d,
+            records: [
+              {
+                employee_id: employee.id,
+                status: bulkStatus === 'Boş' ? null : bulkStatus,
+                work_hours: hrs,
+                daily_wage: wage,
+                paid_amount: paidAmt,
+                account_id: paidAmt > 0 && bulkAccountId ? Number(bulkAccountId) : null,
+              },
+            ],
+          }),
+        });
+      }
+
+      await fetchCalendar(employee.id, selectedMonth);
+      if (onAttendanceUpdated) onAttendanceUpdated();
+      setSelectedDates([]);
+      setIsMultiSelectMode(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Toplu güncelleme hatası.');
+    } finally {
+      setSavingBulk(false);
+    }
+  };
+
+  const handleToggleDateSelection = (dateIso: string) => {
+    setSelectedDates((prev) =>
+      prev.includes(dateIso) ? prev.filter((d) => d !== dateIso) : [...prev, dateIso]
+    );
+  };
+
+  const handleSelectAllWorkingDays = () => {
+    const list: string[] = [];
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateIso = `${yearNum}-${String(monthNum).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const dayOfWeek = new Date(yearNum, monthNum - 1, day).getDay(); // 0 is Sunday
+      if (dayOfWeek !== 0) list.push(dateIso);
+    }
+    setSelectedDates(list);
+  };
+
+  const handleSelectAllDays = () => {
+    const list: string[] = [];
+    for (let day = 1; day <= daysInMonth; day++) {
+      list.push(`${yearNum}-${String(monthNum).padStart(2, '0')}-${String(day).padStart(2, '0')}`);
+    }
+    setSelectedDates(list);
+  };
+
   return (
     <Modal
       isOpen={isOpen}
@@ -379,6 +465,24 @@ export default function EmployeeCalendarModal({
 
           {/* Actions & Month Switcher */}
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                const nextMode = !isMultiSelectMode;
+                setIsMultiSelectMode(nextMode);
+                setSelectedDates([]);
+                setSelectedDayDate(null);
+              }}
+              className={`inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all shadow-sm ${
+                isMultiSelectMode
+                  ? 'bg-amber-500 text-white shadow-amber-500/25 ring-2 ring-amber-400'
+                  : 'bg-white text-gray-700 hover:bg-gray-100 border border-gray-200'
+              }`}
+              title="Birden çok gün seçerek toplu yoklama düzenle"
+            >
+              <span>☑️</span> {isMultiSelectMode ? 'Çoklu Seçimi Kapat' : 'Çoklu Seçim (Multi-Select)'}
+            </button>
+
             {onOpenPayDue && (
               <button
                 onClick={() => {
@@ -532,15 +636,24 @@ export default function EmployeeCalendarModal({
               const isUnpaid = isWorking && paidAmt === 0;
               const isAbsent = record?.status === 'Gelmedi';
               const hasRecord = !!record;
+              const isMultiSelected = selectedDates.includes(dateIso);
 
               return (
                 <div
                   key={dateIso}
-                  onClick={() => handleSelectDay(dateIso)}
+                  onClick={() => {
+                    if (isMultiSelectMode) {
+                      handleToggleDateSelection(dateIso);
+                    } else {
+                      handleSelectDay(dateIso);
+                    }
+                  }}
                   className={`
                     relative h-16 sm:h-20 p-1.5 rounded-xl border transition-all duration-200 flex flex-col justify-between cursor-pointer group
                     ${
-                      isSelected
+                      isMultiSelectMode && isMultiSelected
+                        ? 'ring-4 ring-amber-400 ring-offset-2 scale-[1.04] z-10 shadow-lg'
+                        : isSelected
                         ? 'ring-3 ring-primary-600 ring-offset-2 scale-[1.03] z-10'
                         : ''
                     }
@@ -567,13 +680,23 @@ export default function EmployeeCalendarModal({
                 >
                   {/* Top: Day Number & Indicator */}
                   <div className="flex items-center justify-between">
-                    <span
-                      className={`text-xs sm:text-sm font-extrabold ${
-                        hasRecord ? 'text-white' : 'text-gray-700'
-                      }`}
-                    >
-                      {dayNum}
-                    </span>
+                    <div className="flex items-center gap-1">
+                      {isMultiSelectMode && (
+                        <input
+                          type="checkbox"
+                          checked={isMultiSelected}
+                          onChange={() => {}} // handled by tile click
+                          className="w-3.5 h-3.5 rounded text-amber-500 focus:ring-amber-400 cursor-pointer pointer-events-none"
+                        />
+                      )}
+                      <span
+                        className={`text-xs sm:text-sm font-extrabold ${
+                          hasRecord ? 'text-white' : 'text-gray-700'
+                        }`}
+                      >
+                        {dayNum}
+                      </span>
+                    </div>
                     {isWorking && (
                       <span className="text-[10px] font-black px-1 rounded bg-black/20 text-white">
                         {workHrs}s
@@ -638,8 +761,194 @@ export default function EmployeeCalendarModal({
           </div>
         </div>
 
+        {/* Multi-Select Bulk Edit Panel */}
+        {isMultiSelectMode && (
+          <div className="p-4 sm:p-5 bg-gradient-to-br from-amber-50 via-white to-orange-50/40 rounded-2xl border-2 border-amber-300 shadow-md animate-in fade-in slide-in-from-bottom-2 duration-200">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 mb-4 border-b border-amber-200">
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 rounded-lg bg-amber-500 text-white font-black text-xs shadow-xs">
+                  ☑️ Çoklu Seçim Modu
+                </span>
+                <span className="text-xs font-bold text-gray-800">
+                  {selectedDates.length > 0
+                    ? `${selectedDates.length} gün seçildi`
+                    : 'Takvimden düzenlemek istediğiniz günlere tıklayın'}
+                </span>
+              </div>
+
+              {/* Quick Select Buttons */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleSelectAllWorkingDays}
+                  className="px-2.5 py-1 rounded-lg text-xs font-bold bg-white text-gray-700 hover:bg-amber-100/70 border border-amber-200 transition-colors"
+                >
+                  Pazar Hariç Tümünü Seç
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSelectAllDays}
+                  className="px-2.5 py-1 rounded-lg text-xs font-bold bg-white text-gray-700 hover:bg-amber-100/70 border border-amber-200 transition-colors"
+                >
+                  Tüm Ayı Seç ({daysInMonth})
+                </button>
+                {selectedDates.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedDates([])}
+                    className="px-2.5 py-1 rounded-lg text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 transition-colors"
+                  >
+                    Seçimi Temizle
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsMultiSelectMode(false);
+                    setSelectedDates([]);
+                  }}
+                  className="px-2.5 py-1 rounded-lg text-xs font-bold text-gray-500 hover:text-gray-800 transition-colors"
+                >
+                  ✕ Kapat
+                </button>
+              </div>
+            </div>
+
+            {/* Bulk Form Options */}
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-gray-700 mb-1.5">
+                  Seçili Günlere Uygulanacak Durum:
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setBulkStatus('Geldi')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
+                      bulkStatus === 'Geldi'
+                        ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm ring-2 ring-emerald-400'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    ✓ Geldi
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBulkStatus('Mesai')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
+                      bulkStatus === 'Mesai'
+                        ? 'bg-purple-600 text-white border-purple-700 shadow-sm ring-2 ring-purple-400'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    ⚡ Mesai (1.5x)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBulkStatus('Gelmedi')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
+                      bulkStatus === 'Gelmedi'
+                        ? 'bg-rose-600 text-white border-rose-700 shadow-sm ring-2 ring-rose-400'
+                        : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    ✗ Gelmedi (0 Saat)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBulkStatus('Boş')}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all border ${
+                      bulkStatus === 'Boş'
+                        ? 'bg-gray-800 text-white border-gray-900 shadow-sm ring-2 ring-gray-400'
+                        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    🗑️ Yoklama Yok (Boş)
+                  </button>
+                </div>
+              </div>
+
+              {/* Hours & Payment for bulk */}
+              {(bulkStatus === 'Geldi' || bulkStatus === 'Mesai') && (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 bg-white rounded-xl border border-gray-200">
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                      Gün Başına Çalışma Saati
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      max="24"
+                      step="0.5"
+                      value={bulkWorkHours}
+                      onChange={(e) => setBulkWorkHours(Math.max(0, parseFloat(e.target.value) || 0))}
+                      className="w-full px-3 py-1.5 rounded-lg border border-primary-300 font-black text-xs text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                      Ödeme Durumu
+                    </label>
+                    <select
+                      value={bulkPaymentMode}
+                      onChange={(e) => setBulkPaymentMode(e.target.value as 'unpaid' | 'full')}
+                      className="w-full px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-900 bg-gray-50"
+                    >
+                      <option value="unpaid">✗ Ödenmedi (Borç Yaz)</option>
+                      <option value="full">✓ Tam Ödendi Olarak İşaretle</option>
+                    </select>
+                  </div>
+
+                  {bulkPaymentMode === 'full' && (
+                    <div>
+                      <label className="block text-[11px] font-bold text-gray-700 mb-1">
+                        Ödenecek Kasa
+                      </label>
+                      <select
+                        value={bulkAccountId}
+                        onChange={(e) => setBulkAccountId(e.target.value)}
+                        className="w-full px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-semibold text-gray-900 bg-gray-50"
+                      >
+                        <option value="">— Harici / Elden —</option>
+                        {accounts.map((acc) => (
+                          <option key={acc.id} value={acc.id}>
+                            {acc.name} ({formatCurrency(acc.balance)})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Submit Action */}
+              <div className="flex items-center justify-between pt-2">
+                <span className="text-xs text-gray-500">
+                  {selectedDates.length > 0 ? (
+                    <span>
+                      Toplam <strong>{selectedDates.length}</strong> gün için <strong>{bulkStatus}</strong> kaydedilecek.
+                    </span>
+                  ) : (
+                    <span className="italic text-amber-700">Lütfen yukarıdaki takvimden günleri tıklayarak seçin.</span>
+                  )}
+                </span>
+
+                <button
+                  type="button"
+                  onClick={handleSaveBulk}
+                  disabled={savingBulk || selectedDates.length === 0}
+                  className="px-6 py-2.5 rounded-xl text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 shadow-md shadow-amber-600/25 disabled:opacity-50 transition-all"
+                >
+                  {savingBulk ? 'Toplu Kaydediliyor...' : `Seçili ${selectedDates.length} Günü Kaydet`}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Selected Day Control Panel (Inline Editor) */}
-        {selectedDayDate && (
+        {!isMultiSelectMode && selectedDayDate && (
           <div className="p-4 sm:p-5 bg-gradient-to-br from-primary-50/50 via-white to-gray-50 rounded-2xl border-2 border-primary-300 shadow-md animate-in fade-in slide-in-from-bottom-3 duration-200">
             <div className="flex items-center justify-between pb-3 mb-4 border-b border-primary-100">
               <div className="flex items-center gap-2">

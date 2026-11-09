@@ -17,10 +17,13 @@ interface Employee {
   id: number;
   first_name: string;
   last_name: string;
+  role?: string;
+  monthly_wage: number;
   daily_wage: number;
   phone: string | null;
   is_active: number;
   created_at: string;
+  total_hours_worked?: number;
   total_days_worked: number;
   total_earned: number;
   total_paid: number;
@@ -31,11 +34,13 @@ interface AttendanceRecord {
   employee_id: number;
   first_name: string;
   last_name: string;
+  default_monthly_wage: number;
   default_daily_wage: number;
   is_active: number;
   attendance_id: number | null;
   date: string | null;
   status: 'Geldi' | 'Yarım Gün' | 'Mesai' | 'Gelmedi' | null;
+  work_hours?: number;
   daily_wage: number;
   is_paid: number; // 0 or 1
   paid_amount: number;
@@ -45,12 +50,24 @@ interface AttendanceRecord {
   note: string | null;
 }
 
+interface MonthlyDayAttendance {
+  employee_id: number;
+  date: string;
+  status: string;
+  work_hours: number;
+  daily_wage: number;
+  paid_amount: number;
+}
+
 interface MonthlyEmployeeStat {
   employee_id: number;
   first_name: string;
   last_name: string;
+  role?: string;
+  default_monthly_wage: number;
   default_daily_wage: number;
   is_active: number;
+  total_hours_worked?: number;
   days_attended: number;
   days_absent: number;
   total_earned: number;
@@ -70,6 +87,7 @@ interface MonthlySummaryResponse {
     totalDue: number;
   };
   employees: MonthlyEmployeeStat[];
+  attendances?: MonthlyDayAttendance[];
 }
 
 interface SalaryHistoryItem {
@@ -125,7 +143,7 @@ function calcHourlyWage(dailyWage: number): number {
   return dailyWage > 0 ? dailyWage / 11 : 0;
 }
 
-function calcMonthlyWage(dailyWage: number, daysInMonth: number): number {
+function calcMonthlyWage(dailyWage: number, daysInMonth: number = 30): number {
   return dailyWage > 0 ? dailyWage * daysInMonth : 0;
 }
 
@@ -166,6 +184,7 @@ export default function SalariesPage() {
   const [empForm, setEmpForm] = useState({
     first_name: '',
     last_name: '',
+    role: '',
     daily_wage: '',
     hourly_wage: '',
     monthly_wage: '',
@@ -175,22 +194,45 @@ export default function SalariesPage() {
   const [empError, setEmpError] = useState('');
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
-  // Synchronized wage change handlers for employee modal
+  // Synchronized wage change handlers for employee modal (Aylık Maaş bazlı: 1 Ay = 30 Gün, 1 Gün = 11 Saat)
+  const handleMonthlyWageChange = (val: string) => {
+    const num = parseFloat(val);
+    if (!isNaN(num) && num >= 0) {
+      const daily = num / 30;
+      const hourly = daily / 11;
+      setEmpForm((prev) => ({
+        ...prev,
+        monthly_wage: val,
+        daily_wage: Number.isInteger(daily) ? daily.toString() : parseFloat(daily.toFixed(2)).toString(),
+        hourly_wage: parseFloat(hourly.toFixed(2)).toString(),
+      }));
+    } else {
+      setEmpForm((prev) => ({
+        ...prev,
+        monthly_wage: val,
+        daily_wage: '',
+        hourly_wage: '',
+      }));
+    }
+  };
+
   const handleDailyWageChange = (val: string) => {
     const num = parseFloat(val);
     if (!isNaN(num) && num >= 0) {
+      const monthly = num * 30;
+      const hourly = num / 11;
       setEmpForm((prev) => ({
         ...prev,
         daily_wage: val,
-        hourly_wage: (num / 11).toFixed(2),
-        monthly_wage: (num * currentDaysInMonth).toFixed(2),
+        monthly_wage: Number.isInteger(monthly) ? monthly.toString() : parseFloat(monthly.toFixed(2)).toString(),
+        hourly_wage: parseFloat(hourly.toFixed(2)).toString(),
       }));
     } else {
       setEmpForm((prev) => ({
         ...prev,
         daily_wage: val,
-        hourly_wage: '',
         monthly_wage: '',
+        hourly_wage: '',
       }));
     }
   };
@@ -199,11 +241,12 @@ export default function SalariesPage() {
     const num = parseFloat(val);
     if (!isNaN(num) && num >= 0) {
       const daily = num * 11;
+      const monthly = daily * 30;
       setEmpForm((prev) => ({
         ...prev,
         hourly_wage: val,
-        daily_wage: daily.toFixed(2),
-        monthly_wage: (daily * currentDaysInMonth).toFixed(2),
+        daily_wage: parseFloat(daily.toFixed(2)).toString(),
+        monthly_wage: parseFloat(monthly.toFixed(2)).toString(),
       }));
     } else {
       setEmpForm((prev) => ({
@@ -211,26 +254,6 @@ export default function SalariesPage() {
         hourly_wage: val,
         daily_wage: '',
         monthly_wage: '',
-      }));
-    }
-  };
-
-  const handleMonthlyWageChange = (val: string) => {
-    const num = parseFloat(val);
-    if (!isNaN(num) && num >= 0 && currentDaysInMonth > 0) {
-      const daily = num / currentDaysInMonth;
-      setEmpForm((prev) => ({
-        ...prev,
-        monthly_wage: val,
-        daily_wage: daily.toFixed(2),
-        hourly_wage: (daily / 11).toFixed(2),
-      }));
-    } else {
-      setEmpForm((prev) => ({
-        ...prev,
-        monthly_wage: val,
-        daily_wage: '',
-        hourly_wage: '',
       }));
     }
   };
@@ -283,6 +306,7 @@ export default function SalariesPage() {
       const formattedRecords = (data.records || []).map((r: AttendanceRecord) => ({
         ...r,
         status: (r.status as 'Geldi' | 'Yarım Gün' | 'Mesai' | 'Gelmedi' | null) || null,
+        work_hours: r.work_hours !== undefined && r.work_hours !== null ? r.work_hours : (r.status === 'Gelmedi' ? 0 : r.status === 'Mesai' ? 16.5 : r.status === 'Yarım Gün' ? 5.5 : 11),
         paid_amount:
           r.paid_amount !== undefined && r.paid_amount !== null
             ? r.paid_amount
@@ -424,17 +448,23 @@ export default function SalariesPage() {
           let updatedWage = rec.daily_wage;
           let updatedPaidAmount = rec.paid_amount;
           let updatedIsPaid = rec.is_paid;
+          let updatedHours = rec.work_hours ?? 11;
 
-          if (targetStatus === 'Yarım Gün') {
-            updatedWage = rec.default_daily_wage / 2;
+          if (targetStatus === 'Mesai') {
+            updatedHours = 11;
+            updatedWage = Math.round(rec.default_daily_wage * 1.5 * 100) / 100;
+          } else if (targetStatus === 'Geldi') {
+            updatedHours = 11;
+            updatedWage = rec.default_daily_wage;
+          } else if (targetStatus === 'Yarım Gün') {
+            updatedHours = 5.5;
+            updatedWage = Math.round((rec.default_daily_wage / 2) * 100) / 100;
             if (updatedPaidAmount > updatedWage) {
               updatedPaidAmount = updatedWage;
             }
-          } else if (targetStatus === 'Mesai') {
-            updatedWage = rec.default_daily_wage * 1.5;
-          } else if (targetStatus === 'Geldi') {
-            updatedWage = rec.default_daily_wage;
           } else if (targetStatus === 'Gelmedi' || targetStatus === null) {
+            updatedHours = 0;
+            updatedWage = 0;
             updatedPaidAmount = 0;
             updatedIsPaid = 0;
           }
@@ -442,6 +472,7 @@ export default function SalariesPage() {
           return {
             ...rec,
             status: targetStatus,
+            work_hours: updatedHours,
             daily_wage: updatedWage,
             is_paid: updatedIsPaid,
             paid_amount: updatedPaidAmount,
@@ -521,6 +552,72 @@ export default function SalariesPage() {
     );
   };
 
+  const handleWorkHoursChange = (employeeId: number, hoursStr: string) => {
+    const hours = Math.max(0, parseFloat(hoursStr) || 0);
+    setLocalRecords((prev) =>
+      prev.map((rec) => {
+        if (rec.employee_id === employeeId) {
+          const hourlyRate = rec.default_daily_wage > 0 ? rec.default_daily_wage / 11 : 0;
+          let calculatedWage = 0;
+          let newStatus = rec.status;
+
+          if (hours === 0) {
+            newStatus = 'Gelmedi';
+            calculatedWage = 0;
+          } else if (rec.status === 'Mesai') {
+            // Mesai seçiliyken saat bedeli 1.5 katı ile çarpılır
+            calculatedWage = Math.round(hours * (hourlyRate * 1.5) * 100) / 100;
+          } else if (hours > 11) {
+            newStatus = 'Mesai';
+            calculatedWage = Math.round(hours * (hourlyRate * 1.5) * 100) / 100;
+          } else if (hours <= 6 && hours > 0) {
+            newStatus = 'Yarım Gün';
+            calculatedWage = Math.round(hours * hourlyRate * 100) / 100;
+          } else {
+            newStatus = 'Geldi';
+            calculatedWage = Math.round(hours * hourlyRate * 100) / 100;
+          }
+
+          const newPaidAmount =
+            rec.is_paid === 1 && (rec.paid_amount === rec.daily_wage || rec.paid_amount > calculatedWage)
+              ? calculatedWage
+              : rec.paid_amount;
+
+          return {
+            ...rec,
+            status: newStatus,
+            work_hours: hours,
+            daily_wage: calculatedWage,
+            paid_amount: newPaidAmount,
+          };
+        }
+        return rec;
+      })
+    );
+  };
+
+  const handleMonthlyWageInputChange = (employeeId: number, monthlyStr: string) => {
+    const monthlyVal = parseFloat(monthlyStr) || 0;
+    const dailyVal = Math.round((monthlyVal / 30) * 100) / 100;
+    setLocalRecords((prev) =>
+      prev.map((rec) => {
+        if (rec.employee_id === employeeId) {
+          const newPaidAmount =
+            rec.is_paid === 1 && (rec.paid_amount === rec.daily_wage || rec.paid_amount > dailyVal)
+              ? dailyVal
+              : rec.paid_amount;
+          return {
+            ...rec,
+            default_monthly_wage: monthlyVal,
+            daily_wage: dailyVal,
+            paid_amount: newPaidAmount,
+          };
+        }
+        return rec;
+      })
+    );
+  };
+
   const handleWageChange = (employeeId: number, wageStr: string) => {
     const val = parseFloat(wageStr) || 0;
     setLocalRecords((prev) =>
@@ -561,6 +658,7 @@ export default function SalariesPage() {
       prev.map((rec) => ({
         ...rec,
         status: 'Geldi',
+        work_hours: 11,
         daily_wage: rec.default_daily_wage,
       }))
     );
@@ -587,6 +685,7 @@ export default function SalariesPage() {
       prev.map((rec) => ({
         ...rec,
         status: null,
+        work_hours: 0,
         is_paid: 0,
         paid_amount: 0,
       }))
@@ -601,6 +700,7 @@ export default function SalariesPage() {
       const recordsToSave = localRecords.map((r) => ({
         employee_id: r.employee_id,
         status: r.status,
+        work_hours: r.work_hours ?? (r.status === 'Gelmedi' ? 0 : r.status === 'Mesai' ? 16.5 : r.status === 'Yarım Gün' ? 5.5 : 11),
         daily_wage: r.daily_wage,
         is_paid:
           (r.status === 'Geldi' || r.status === 'Yarım Gün' || r.status === 'Mesai') &&
@@ -646,9 +746,10 @@ export default function SalariesPage() {
     setEmpForm({
       first_name: '',
       last_name: '',
+      role: '',
+      monthly_wage: '',
       daily_wage: '',
       hourly_wage: '',
-      monthly_wage: '',
       phone: '',
     });
     setEmpError('');
@@ -657,13 +758,16 @@ export default function SalariesPage() {
 
   const openEditEmployeeModal = (emp: Employee) => {
     setEditingEmployee(emp);
-    const wage = Number(emp.daily_wage) || 0;
+    const monthly = Number(emp.monthly_wage) || 0;
+    const daily = Number(emp.daily_wage) || 0;
+    const hourly = daily > 0 ? daily / 11 : 0;
     setEmpForm({
       first_name: emp.first_name,
       last_name: emp.last_name,
-      daily_wage: String(wage),
-      hourly_wage: wage > 0 ? (wage / 11).toFixed(2) : '',
-      monthly_wage: wage > 0 ? (wage * currentDaysInMonth).toFixed(2) : '',
+      role: emp.role || '',
+      monthly_wage: monthly > 0 ? (Number.isInteger(monthly) ? monthly.toString() : parseFloat(monthly.toFixed(2)).toString()) : '',
+      daily_wage: daily > 0 ? (Number.isInteger(daily) ? daily.toString() : parseFloat(daily.toFixed(2)).toString()) : '',
+      hourly_wage: hourly > 0 ? parseFloat(hourly.toFixed(2)).toString() : '',
       phone: emp.phone || '',
     });
     setEmpError('');
@@ -679,13 +783,16 @@ export default function SalariesPage() {
       const url = editingEmployee ? `/api/employees/${editingEmployee.id}` : '/api/employees';
       const method = editingEmployee ? 'PUT' : 'POST';
 
+      const monthlyNum = parseFloat(empForm.monthly_wage) || 0;
+
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           first_name: empForm.first_name,
           last_name: empForm.last_name,
-          daily_wage: parseFloat(empForm.daily_wage) || 0,
+          role: empForm.role,
+          monthly_wage: monthlyNum,
           phone: empForm.phone || null,
         }),
       });
@@ -786,41 +893,105 @@ export default function SalariesPage() {
     }
   };
 
-  // Export Monthly Summary to Excel
+  // Export Monthly Summary to Excel (Puantaj Formatı - Kağıttaki Çizelge Düzeni)
   const handleExportMonthlyExcel = () => {
     if (!monthlyData || monthlyData.employees.length === 0) return;
 
+    const [yearNum, monthNum] = monthlyData.month.split('-').map(Number);
     const selectedMonthDays = getDaysInMonthFromStr(monthlyData.month);
 
-    const rows = monthlyData.employees.map((e) => ({
-      'Çalışan': `${e.first_name} ${e.last_name}`,
-      'Günlük Yevmiye (₺)': e.default_daily_wage,
-      'Saatlik Ücret (11 Saat) (₺)': Number((e.default_daily_wage / 11).toFixed(2)),
-      [`Aylık Taban Ücret (${selectedMonthDays} Gün) (₺)`]: e.default_daily_wage * selectedMonthDays,
-      'Çalıştığı Gün (Geldi / Yarım / Mesai)': e.days_attended,
-      'Gelmeyen Gün': e.days_absent,
-      'Toplam Hak Ediş (₺)': e.total_earned,
-      'Ödenen Tutar (₺)': e.total_paid,
-      'Kalan Bakiye / Borç (₺)': e.balance_due,
-      'Durum': e.is_active ? 'Aktif' : 'Pasif',
-    }));
+    const DAY_NAMES_TR = ['PAZ', 'PZT', 'SAL', 'ÇAR', 'PER', 'CUM', 'CMT'];
 
-    const worksheet = XLSX.utils.json_to_sheet(rows);
-    worksheet['!cols'] = [
-      { wch: 25 },
-      { wch: 18 },
-      { wch: 22 },
-      { wch: 25 },
-      { wch: 20 },
-      { wch: 15 },
-      { wch: 20 },
-      { wch: 18 },
-      { wch: 22 },
-      { wch: 10 },
+    // Map attendances by employeeId and date
+    const attMap = new Map<string, MonthlyDayAttendance>();
+    (monthlyData.attendances || []).forEach((att) => {
+      attMap.set(`${att.employee_id}_${att.date}`, att);
+    });
+
+    // 1. Satır: Başlıklar (1, 2, 3... günlerin üstünde gün isimleri PAZ, PZT...)
+    // 2. Satır: Gün numaraları (1, 2, 3...)
+    // Satırlar: AD SOYAD, GÖREV, [1..days], TOPLAM SAAT, MAAŞ, HAKEDİŞ
+
+    const tableData: any[][] = [];
+
+    // Title Row
+    const titleMonthName = MONTH_NAMES[monthNum - 1]?.toLowerCase() || '';
+    tableData.push([`${titleMonthName} ayı puantaj MAAŞ`]);
+
+    // Row 1: Header names (AD SOYAD, GÖREV, PAZ, PZT..., TOPLAM SAAT, MAAŞ, HAKEDİŞ, ÖDENEN TUTAR, KALAN BORÇ)
+    const headerRow1: any[] = ['AD SOYAD', 'GÖREV'];
+    for (let day = 1; day <= selectedMonthDays; day++) {
+      const dayDate = new Date(yearNum, monthNum - 1, day);
+      const dayName = DAY_NAMES_TR[dayDate.getDay()];
+      headerRow1.push(dayName);
+    }
+    headerRow1.push('TOPLAM SAAT', 'MAAŞ', 'HAKEDİŞ', 'ÖDENEN TUTAR', 'KALAN BORÇ');
+    tableData.push(headerRow1);
+
+    // Row 2: Day numbers (empty, empty, 1, 2, 3..., empty, empty, empty, empty, empty)
+    const headerRow2: any[] = ['', ''];
+    for (let day = 1; day <= selectedMonthDays; day++) {
+      headerRow2.push(day);
+    }
+    headerRow2.push('', '', '', '', '');
+    tableData.push(headerRow2);
+
+    // Employee Rows
+    monthlyData.employees.forEach((e) => {
+      const row: any[] = [
+        `${e.first_name} ${e.last_name}`,
+        e.role || '—',
+      ];
+
+      let totalMonthHours = 0;
+      for (let day = 1; day <= selectedMonthDays; day++) {
+        const dayStr = String(day).padStart(2, '0');
+        const dateStr = `${monthlyData.month}-${dayStr}`;
+        const dayDate = new Date(yearNum, monthNum - 1, day);
+        const isSunday = dayDate.getDay() === 0;
+
+        const att = attMap.get(`${e.employee_id}_${dateStr}`);
+        if (att) {
+          const hours = Number(att.work_hours ?? (att.status === 'Gelmedi' ? 0 : 11));
+          if (hours > 0) {
+            row.push(hours);
+            totalMonthHours += hours;
+          } else {
+            row.push(isSunday ? 'HF' : 0);
+          }
+        } else {
+          // No attendance recorded: if Sunday show 'HF' (Hafta Tatili), else empty
+          row.push(isSunday ? 'HF' : '');
+        }
+      }
+
+      const monthlyWage = e.default_monthly_wage || calcMonthlyWage(e.default_daily_wage);
+      const remainingDue = Number(e.total_earned || 0) - Number(e.total_paid || 0);
+      row.push(totalMonthHours, monthlyWage, e.total_earned, e.total_paid, remainingDue);
+      tableData.push(row);
+    });
+
+    const worksheet = XLSX.utils.aoa_to_sheet(tableData);
+
+    // Set column widths
+    const colWidths = [
+      { wch: 22 }, // AD SOYAD
+      { wch: 14 }, // GÖREV
     ];
+    for (let day = 1; day <= selectedMonthDays; day++) {
+      colWidths.push({ wch: 5.5 }); // Days
+    }
+    colWidths.push(
+      { wch: 14 }, // TOPLAM SAAT
+      { wch: 12 }, // MAAŞ
+      { wch: 14 }, // HAKEDİŞ
+      { wch: 16 }, // ÖDENEN TUTAR
+      { wch: 16 }  // KALAN BORÇ
+    );
+    worksheet['!cols'] = colWidths;
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, `Maaş_${monthlyData.month}`);
+    XLSX.utils.book_append_sheet(workbook, worksheet, `Puantaj_${monthlyData.month}`);
 
     const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([buffer], {
@@ -830,7 +1001,7 @@ export default function SalariesPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Maas_Bordrosu_${monthlyData.month}.xlsx`;
+    a.download = `${titleMonthName}_ayi_puantaj_MAAS_${monthlyData.month}.xlsx`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -841,13 +1012,30 @@ export default function SalariesPage() {
   const handleExportMonthlyCSV = () => {
     if (!monthlyData || monthlyData.employees.length === 0) return;
 
+    const [yearNum, monthNum] = monthlyData.month.split('-').map(Number);
     const selectedMonthDays = getDaysInMonthFromStr(monthlyData.month);
+    const DAY_NAMES_TR = ['Paz', 'Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt'];
+
+    const attMap = new Map<string, MonthlyDayAttendance>();
+    (monthlyData.attendances || []).forEach((att) => {
+      attMap.set(`${att.employee_id}_${att.date}`, att);
+    });
+
+    const dayHeaders: string[] = [];
+    for (let day = 1; day <= selectedMonthDays; day++) {
+      const dayStr = String(day).padStart(2, '0');
+      const dayDate = new Date(yearNum, monthNum - 1, day);
+      const dayName = DAY_NAMES_TR[dayDate.getDay()];
+      dayHeaders.push(`${dayStr} ${dayName}`);
+    }
 
     const headers = [
       'Çalışan',
-      'Günlük Yevmiye (TL)',
+      'Aylık Maaş (TL)',
+      'Günlük Ücret (TL)',
       'Saatlik Ücret (11 Saat) (TL)',
-      `Aylık Taban Ücret (${selectedMonthDays} Gün) (TL)`,
+      ...dayHeaders,
+      'Toplam Çalışılan Saat',
       'Çalıştığı Gün',
       'Gelmediği Gün',
       'Toplam Hak Ediş (TL)',
@@ -860,20 +1048,37 @@ export default function SalariesPage() {
 
     const lines = [
       headers.map(escapeCSV).join(';'),
-      ...monthlyData.employees.map((e) =>
-        [
+      ...monthlyData.employees.map((e) => {
+        let totalHours = 0;
+        const dayValues = [];
+        for (let day = 1; day <= selectedMonthDays; day++) {
+          const dayStr = String(day).padStart(2, '0');
+          const dateStr = `${monthlyData.month}-${dayStr}`;
+          const att = attMap.get(`${e.employee_id}_${dateStr}`);
+          if (att) {
+            const h = Number(att.work_hours ?? (att.status === 'Gelmedi' ? 0 : att.status === 'Mesai' ? 16.5 : att.status === 'Yarım Gün' ? 5.5 : 11));
+            dayValues.push(escapeCSV(h > 0 ? `${h}s` : '0s'));
+            totalHours += h;
+          } else {
+            dayValues.push(escapeCSV('—'));
+          }
+        }
+
+        return [
           escapeCSV(`${e.first_name} ${e.last_name}`),
+          escapeCSV(e.default_monthly_wage || calcMonthlyWage(e.default_daily_wage)),
           escapeCSV(e.default_daily_wage),
           escapeCSV((e.default_daily_wage / 11).toFixed(2)),
-          escapeCSV(e.default_daily_wage * selectedMonthDays),
+          ...dayValues,
+          escapeCSV(totalHours),
           escapeCSV(e.days_attended),
           escapeCSV(e.days_absent),
           escapeCSV(e.total_earned),
           escapeCSV(e.total_paid),
           escapeCSV(e.balance_due),
           escapeCSV(e.is_active ? 'Aktif' : 'Pasif'),
-        ].join(';')
-      ),
+        ].join(';');
+      }),
     ];
 
     const csvContent = '\uFEFF' + lines.join('\r\n');
@@ -881,7 +1086,7 @@ export default function SalariesPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Maas_Bordrosu_${monthlyData.month}.csv`;
+    a.download = `Maas_Bordrosu_Saatli_${monthlyData.month}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -978,7 +1183,7 @@ export default function SalariesPage() {
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Maaş & Yoklama Takibi</h1>
           <p className="text-gray-500 mt-1 text-sm">
-            Personel günlük yevmiye yoklaması, hakediş ve kasa ödeme yönetimi
+            Personel maaş ve yoklama takibi, hakediş ve kasa ödeme yönetimi
           </p>
         </div>
 
@@ -1198,7 +1403,7 @@ export default function SalariesPage() {
                   <thead>
                     <tr className="bg-gray-50/80 border-b border-gray-100 text-gray-500 font-bold uppercase text-left">
                       <th className="px-5 py-3.5">Çalışan</th>
-                      <th className="px-4 py-3.5">Yevmiye (₺)</th>
+                      <th className="px-4 py-3.5">Aylık Maaş (₺)</th>
                       <th className="px-4 py-3.5 text-center">Yoklama Durumu</th>
                       <th className="px-4 py-3.5 text-center">Ödeme Durumu</th>
                       <th className="px-4 py-3.5">Kasa Seçimi</th>
@@ -1257,7 +1462,7 @@ export default function SalariesPage() {
                                   <span className="text-gray-400 group-hover:text-primary-500 text-xs">📅</span>
                                 </p>
                                 <p className="text-[11px] text-gray-500 leading-tight">
-                                  Yevmiye: <span className="font-semibold text-gray-800">{formatCurrency(rec.default_daily_wage)}</span> · Saatlik (11s): <span className="font-semibold text-primary-700">{formatCurrency(calcHourlyWage(rec.default_daily_wage))}</span> · Aylık ({currentDaysInMonth}g): <span className="font-semibold text-indigo-700">{formatCurrency(calcMonthlyWage(rec.default_daily_wage, currentDaysInMonth))}</span>
+                                  Maaş: <span className="font-semibold text-indigo-700">{formatCurrency(rec.default_monthly_wage)}</span> · Günlük: <span className="font-semibold text-gray-800">{formatCurrency(rec.default_daily_wage)}</span> · Saatlik (11s): <span className="font-semibold text-primary-700">{formatCurrency(calcHourlyWage(rec.default_daily_wage))}</span>
                                   {isHalfDay
                                     ? ` · (Yarım: ${formatCurrency(rec.default_daily_wage / 2)})`
                                     : isMesai
@@ -1268,87 +1473,120 @@ export default function SalariesPage() {
                             </div>
                           </td>
 
-                          {/* Daily wage input & hourly indicator */}
+                          {/* Monthly wage input with auto-calculated daily & hourly indicator */}
                           <td className="px-4 py-4">
-                            <div className="flex flex-col gap-0.5">
-                              <div className="flex items-center gap-1">
-                                <span className="text-gray-400 font-semibold">₺</span>
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-indigo-600 font-extrabold text-xs">₺</span>
                                 <input
                                   type="number"
                                   min="0"
                                   step="any"
-                                  value={rec.daily_wage}
-                                  onChange={(e) => handleWageChange(rec.employee_id, e.target.value)}
-                                  className="w-24 px-2.5 py-1.5 rounded-lg border border-gray-200 font-bold text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+                                  value={rec.default_monthly_wage || (rec.daily_wage ? Math.round(rec.daily_wage * 30) : '')}
+                                  onChange={(e) => handleMonthlyWageInputChange(rec.employee_id, e.target.value)}
+                                  placeholder="Aylık Maaş"
+                                  className="w-28 px-2.5 py-1.5 rounded-lg border border-indigo-200 font-extrabold text-indigo-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 text-xs shadow-2xs"
                                 />
                               </div>
-                              <span className="text-[10px] text-gray-400 font-medium">
-                                Saatlik: {formatCurrency(calcHourlyWage(rec.daily_wage))}
-                              </span>
+                              <div className="text-[10px] text-gray-500 flex items-center gap-1.5 font-medium">
+                                <span>Günlük: <strong className="text-gray-800">{formatCurrency(rec.daily_wage)}</strong></span>
+                                <span>·</span>
+                                <span>Saatlik: <strong className="text-primary-700">{formatCurrency(calcHourlyWage(rec.daily_wage))}</strong></span>
+                              </div>
                             </div>
                           </td>
 
-                          {/* Attendance Status Toggle Buttons */}
+                          {/* Attendance Status Toggle Buttons with Daily Hours Input */}
                           <td className="px-4 py-4 text-center">
-                            <div className="inline-flex rounded-xl p-1 bg-gray-100 border border-gray-200 gap-1">
-                              <button
-                                type="button"
-                                onClick={() => handleStatusChange(rec.employee_id, 'Geldi')}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                                  rec.status === 'Geldi'
-                                    ? 'bg-emerald-500 text-white shadow-sm'
-                                    : 'text-gray-500 hover:text-gray-800'
-                                }`}
-                              >
-                                ✓ Geldi
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleStatusChange(rec.employee_id, 'Yarım Gün')}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                                  rec.status === 'Yarım Gün'
-                                    ? 'bg-indigo-600 text-white shadow-sm'
-                                    : 'text-gray-500 hover:text-gray-800'
-                                }`}
-                                title="Yarım gün (günlük ücretin yarısı yazılır)"
-                              >
-                                ½ Yarım
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleStatusChange(rec.employee_id, 'Mesai')}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                                  rec.status === 'Mesai'
-                                    ? 'bg-purple-600 text-white shadow-sm'
-                                    : 'text-gray-500 hover:text-gray-800'
-                                }`}
-                                title={`Mesai (günlük ücretin 1.5 katı: ${formatCurrency(rec.default_daily_wage * 1.5)})`}
-                              >
-                                ⚡ Mesai
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleStatusChange(rec.employee_id, 'Gelmedi')}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                                  rec.status === 'Gelmedi'
-                                    ? 'bg-rose-500 text-white shadow-sm'
-                                    : 'text-gray-500 hover:text-gray-800'
-                                }`}
-                              >
-                                ✗ Gelmedi
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleStatusChange(rec.employee_id, null)}
-                                className={`px-2 py-1.5 rounded-lg text-xs font-semibold transition-all ${
-                                  !rec.status
-                                    ? 'bg-gray-700 text-white shadow-sm'
-                                    : 'text-gray-400 hover:text-gray-700'
-                                }`}
-                                title="Yoklama kaydını temizle / boş bırak"
-                              >
-                                — Boş
-                              </button>
+                            <div className="flex flex-col items-center gap-1.5">
+                              <div className="inline-flex rounded-xl p-1 bg-gray-100 border border-gray-200 gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleStatusChange(rec.employee_id, 'Geldi')}
+                                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                    rec.status === 'Geldi'
+                                      ? 'bg-emerald-500 text-white shadow-sm'
+                                      : 'text-gray-500 hover:text-gray-800'
+                                  }`}
+                                  title="Tam gün çalışma (11 saat)"
+                                >
+                                  ✓ Geldi
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleStatusChange(rec.employee_id, 'Mesai')}
+                                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                    rec.status === 'Mesai'
+                                      ? 'bg-purple-600 text-white shadow-sm'
+                                      : 'text-gray-500 hover:text-gray-800'
+                                  }`}
+                                  title={`Mesai (1.5 katı ücret: ${formatCurrency(rec.default_daily_wage * 1.5)})`}
+                                >
+                                  ⚡ Mesai
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleStatusChange(rec.employee_id, 'Gelmedi')}
+                                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                                    rec.status === 'Gelmedi'
+                                      ? 'bg-rose-500 text-white shadow-sm'
+                                      : 'text-gray-500 hover:text-gray-800'
+                                  }`}
+                                  title="Gelmedi (0 saat - kutucuk kilitlenir)"
+                                >
+                                  ✗ Gelmedi
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleStatusChange(rec.employee_id, null)}
+                                  className={`px-2 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                                    !rec.status
+                                      ? 'bg-gray-700 text-white shadow-sm'
+                                      : 'text-gray-400 hover:text-gray-700'
+                                  }`}
+                                  title="Yoklama kaydını temizle / boş bırak"
+                                >
+                                  — Boş
+                                </button>
+                              </div>
+
+                              {/* ÇALIŞMA SAATİ KUTUCUĞU */}
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <label className="text-[11px] font-bold text-gray-600 flex items-center gap-1">
+                                  <span>⏱️</span> Saat:
+                                </label>
+                                <div className="relative flex items-center">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    max="24"
+                                    step="0.5"
+                                    disabled={rec.status === 'Gelmedi'}
+                                    value={
+                                      rec.status === 'Gelmedi'
+                                        ? 0
+                                        : rec.work_hours !== undefined
+                                        ? rec.work_hours
+                                        : rec.status === 'Mesai'
+                                        ? 16.5
+                                        : rec.status === 'Yarım Gün'
+                                        ? 5.5
+                                        : rec.status === 'Geldi'
+                                        ? 11
+                                        : ''
+                                    }
+                                    onChange={(e) => handleWorkHoursChange(rec.employee_id, e.target.value)}
+                                    placeholder="Saat"
+                                    title={rec.status === 'Gelmedi' ? 'Gelmedi seçiliyken saat girilemez (0 saat)' : 'Günlük çalışılan saat'}
+                                    className={`w-16 px-2 py-1 rounded-lg border text-center font-black text-xs transition-all ${
+                                      rec.status === 'Gelmedi'
+                                        ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                                        : 'bg-white text-gray-900 border-primary-300 focus:outline-none focus:ring-2 focus:ring-primary-500/20 shadow-2xs'
+                                    }`}
+                                  />
+                                  <span className="text-[10px] text-gray-400 font-bold ml-1">saat</span>
+                                </div>
+                              </div>
                             </div>
                           </td>
 
@@ -1365,7 +1603,7 @@ export default function SalariesPage() {
                                         ? 'bg-emerald-600 text-white shadow-sm'
                                         : 'text-gray-500 hover:text-gray-800'
                                     }`}
-                                    title="Tüm günlük yevmiyeyi ödendi yap"
+                                    title="Günün hak edişini tam ödendi yap"
                                   >
                                     ✓ Tam Ödendi
                                   </button>
@@ -1548,19 +1786,19 @@ export default function SalariesPage() {
                     </span>
                   </div>
 
-                  {/* Wage Breakdown Box (Günlük, Saatlik, Aylık) */}
+                  {/* Wage Breakdown Box (Aylık Maaş, Günlük, Saatlik) */}
                   <div className="bg-gradient-to-r from-blue-50/70 via-indigo-50/50 to-primary-50/70 border border-primary-100 rounded-xl p-2.5 text-xs grid grid-cols-3 gap-1.5 text-center shadow-xs">
                     <div>
-                      <span className="text-[10px] font-bold text-gray-500 block">Günlük Yevmiye</span>
-                      <span className="font-extrabold text-gray-900 text-xs sm:text-sm">{formatCurrency(emp.daily_wage)}</span>
+                      <span className="text-[10px] font-bold text-indigo-700 block">Aylık Maaş</span>
+                      <span className="font-extrabold text-indigo-900 text-xs sm:text-sm">{formatCurrency(emp.monthly_wage)}</span>
                     </div>
                     <div className="border-x border-primary-100">
-                      <span className="text-[10px] font-bold text-primary-700 block" title="Yevmiye ÷ 11 Saat">Saatlik (11s)</span>
-                      <span className="font-extrabold text-primary-800 text-xs sm:text-sm">{formatCurrency(calcHourlyWage(emp.daily_wage))}</span>
+                      <span className="text-[10px] font-bold text-gray-500 block" title="Maaş ÷ 30">Günlük</span>
+                      <span className="font-extrabold text-gray-900 text-xs sm:text-sm">{formatCurrency(emp.daily_wage)}</span>
                     </div>
                     <div>
-                      <span className="text-[10px] font-bold text-indigo-700 block" title={`${currentMonthName} (${currentDaysInMonth} Gün) × Yevmiye`}>Aylık ({currentDaysInMonth}g)</span>
-                      <span className="font-extrabold text-indigo-900 text-xs sm:text-sm">{formatCurrency(calcMonthlyWage(emp.daily_wage, currentDaysInMonth))}</span>
+                      <span className="text-[10px] font-bold text-primary-700 block" title="Günlük ÷ 11 Saat">Saatlik (11s)</span>
+                      <span className="font-extrabold text-primary-800 text-xs sm:text-sm">{formatCurrency(calcHourlyWage(emp.daily_wage))}</span>
                     </div>
                   </div>
 
@@ -1572,7 +1810,9 @@ export default function SalariesPage() {
                   >
                     <div>
                       <span className="text-gray-400 text-[11px]">Toplam Çalışma</span>
-                      <p className="font-bold text-gray-900 text-sm">{emp.total_days_worked} Gün</p>
+                      <p className="font-bold text-gray-900 text-sm">
+                        {emp.total_hours_worked !== undefined ? emp.total_hours_worked : emp.total_days_worked} Saat
+                      </p>
                     </div>
                     <div>
                       <span className="text-gray-400 text-[11px]">Toplam Hak Ediş</span>
@@ -1746,8 +1986,8 @@ export default function SalariesPage() {
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-100 text-gray-500 font-bold uppercase text-left">
                       <th className="px-5 py-3.5">Çalışan</th>
-                      <th className="px-4 py-3.5 text-right">Ücretler (Günlük / Saatlik / Aylık)</th>
-                      <th className="px-4 py-3.5 text-center">Çalıştığı Gün</th>
+                      <th className="px-4 py-3.5 text-right">Maaş Bilgisi (Aylık / Günlük / Saatlik)</th>
+                      <th className="px-4 py-3.5 text-center">Toplam Çalışma</th>
                       <th className="px-4 py-3.5 text-center">Gelmeyen Gün</th>
                       <th className="px-4 py-3.5 text-right">Toplam Hak Ediş</th>
                       <th className="px-4 py-3.5 text-right">Ödenen Tutar</th>
@@ -1774,18 +2014,18 @@ export default function SalariesPage() {
                         </td>
                         <td className="px-4 py-4 text-right">
                           <div className="font-bold text-gray-900">
-                            {formatCurrency(emp.default_daily_wage)}
-                            <span className="text-[10px] text-gray-400 font-normal"> /gün</span>
+                            {formatCurrency(emp.default_monthly_wage || calcMonthlyWage(emp.default_daily_wage))}
+                            <span className="text-[10px] text-gray-400 font-normal"> /ay</span>
                           </div>
                           <div className="text-[11px] text-gray-500 flex items-center justify-end gap-1.5 mt-0.5">
-                            <span title="Yevmiye ÷ 11 Saat">Saat: {formatCurrency(calcHourlyWage(emp.default_daily_wage))}</span>
+                            <span title="Günlük Ücret (Maaş ÷ 30)">Günlük: {formatCurrency(emp.default_daily_wage)}</span>
                             <span>·</span>
-                            <span title={`Bu ay (${selectedMonthDays} gün) × Yevmiye`}>Ay ({selectedMonthDays}g): {formatCurrency(calcMonthlyWage(emp.default_daily_wage, selectedMonthDays))}</span>
+                            <span title="Günlük ÷ 11 Saat">Saat: {formatCurrency(calcHourlyWage(emp.default_daily_wage))}</span>
                           </div>
                         </td>
                         <td className="px-4 py-4 text-center">
                           <span className="px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-bold">
-                            {emp.days_attended} Gün
+                            {emp.total_hours_worked !== undefined ? emp.total_hours_worked : emp.days_attended * 11} Saat
                           </span>
                         </td>
                         <td className="px-4 py-4 text-center text-gray-400">
@@ -2099,7 +2339,7 @@ export default function SalariesPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-bold text-gray-700 mb-1.5">İsim *</label>
               <input
@@ -2123,40 +2363,67 @@ export default function SalariesPage() {
                 className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
               />
             </div>
+
+            <div>
+              <label className="block text-xs font-bold text-gray-700 mb-1.5">Görev / Pozisyon</label>
+              <input
+                type="text"
+                value={empForm.role}
+                onChange={(e) => setEmpForm({ ...empForm, role: e.target.value })}
+                placeholder="Örn: KONTROL, REÇME, OVERLOK"
+                className="w-full px-3.5 py-2.5 rounded-xl border border-gray-200 text-sm text-gray-900 bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+              />
+            </div>
           </div>
 
-          {/* 3-way synchronized wage fields */}
-          <div className="p-4 rounded-2xl bg-gradient-to-br from-primary-50/70 via-blue-50/50 to-indigo-50/40 border border-primary-100/90 space-y-3">
+          {/* 3-way synchronized salary & wage fields */}
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50/70 via-blue-50/50 to-purple-50/40 border border-indigo-100/90 space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-primary-900 flex items-center gap-1.5">
-                <span>💰</span> Ücret Tanımlama
+              <span className="text-xs font-bold text-indigo-900 flex items-center gap-1.5">
+                <span>💰</span> Maaş ve Ücret Tanımlama
               </span>
-              <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary-100 text-primary-700 font-bold">
-                Otomatik Senkronize
+              <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700 font-bold">
+                Otomatik Hesaplanır
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              {/* Günlük Yevmiye */}
+              {/* Aylık Maaş (Ana Giriş) */}
               <div>
-                <label className="block text-[11px] font-bold text-gray-700 mb-1">
-                  Günlük Yevmiye (₺) *
+                <label className="block text-[11px] font-bold text-gray-700 mb-1" title="Aylık Standart Maaş (30 gün)">
+                  Aylık Maaş (₺) *
                 </label>
                 <input
                   type="number"
                   required
                   min="0"
                   step="any"
+                  value={empForm.monthly_wage}
+                  onChange={(e) => handleMonthlyWageChange(e.target.value)}
+                  placeholder="Örn: 30000"
+                  className="w-full px-3 py-2 rounded-xl border border-indigo-300 text-sm font-extrabold text-indigo-900 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500/20 shadow-xs"
+                />
+              </div>
+
+              {/* Günlük Ücret */}
+              <div>
+                <label className="block text-[11px] font-bold text-gray-700 mb-1" title="Günlük Hakediş (Aylık Maaş ÷ 30)">
+                  Günlük Ücret (₺) <span className="text-[10px] text-gray-500 font-normal">(Maaş ÷ 30)</span>
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
                   value={empForm.daily_wage}
                   onChange={(e) => handleDailyWageChange(e.target.value)}
-                  placeholder="Örn: 1100"
+                  placeholder="Maaş ÷ 30"
                   className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20 shadow-xs"
                 />
               </div>
 
               {/* Saatlik Ücret */}
               <div>
-                <label className="block text-[11px] font-bold text-gray-700 mb-1" title="1 gün = 11 çalışma saati (Yevmiye ÷ 11)">
+                <label className="block text-[11px] font-bold text-gray-700 mb-1" title="1 gün = 11 çalışma saati (Günlük ÷ 11)">
                   Saatlik Ücret (₺) <span className="text-[10px] text-primary-600 font-normal">(11s)</span>
                 </label>
                 <input
@@ -2165,30 +2432,14 @@ export default function SalariesPage() {
                   step="any"
                   value={empForm.hourly_wage}
                   onChange={(e) => handleHourlyWageChange(e.target.value)}
-                  placeholder="Yevmiye ÷ 11"
-                  className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20 shadow-xs"
-                />
-              </div>
-
-              {/* Aylık Ücret */}
-              <div>
-                <label className="block text-[11px] font-bold text-gray-700 mb-1" title={`${currentMonthName} ayı ${currentDaysInMonth} gün dahil (Gün Sayısı × Yevmiye)`}>
-                  Aylık Ücret (₺) <span className="text-[10px] text-indigo-600 font-normal">({currentDaysInMonth}g)</span>
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={empForm.monthly_wage}
-                  onChange={(e) => handleMonthlyWageChange(e.target.value)}
-                  placeholder={`${currentDaysInMonth} Gün × Yevmiye`}
+                  placeholder="Günlük ÷ 11"
                   className="w-full px-3 py-2 rounded-xl border border-gray-200 text-sm font-bold text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20 shadow-xs"
                 />
               </div>
             </div>
 
             <p className="text-[11px] text-gray-500 leading-tight">
-              💡 <strong>Kural:</strong> Saatlik ücret <span className="text-gray-700 font-semibold">Yevmiye ÷ 11</span> olarak, aylık ücret ise o ayın tüm günleri dahil edilerek (<span className="text-gray-700 font-semibold">{currentMonthName}: {currentDaysInMonth} Gün × Yevmiye</span>) hesaplanır. İster günlük, ister saatlik, ister aylık yazın; sistem diğerlerini otomatik çevirir.
+              💡 <strong>Kural:</strong> Aylık maaşı girdiğinizde, günlük ücret <span className="text-gray-700 font-semibold">Maaş ÷ 30</span> ve saatlik ücret <span className="text-gray-700 font-semibold">Günlük ÷ 11</span> olarak otomatik hesaplanır. İster aylık maaş, ister günlük, ister saatlik yazın; sistem diğerlerini anında senkronize eder.
             </p>
           </div>
 

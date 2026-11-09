@@ -60,6 +60,8 @@ export async function initializeDatabase(): Promise<void> {
         id          INTEGER PRIMARY KEY AUTOINCREMENT,
         first_name  TEXT NOT NULL,
         last_name   TEXT NOT NULL,
+        role        TEXT DEFAULT '',
+        monthly_wage REAL NOT NULL DEFAULT 0,
         daily_wage  REAL NOT NULL DEFAULT 0,
         phone       TEXT,
         is_active   INTEGER NOT NULL DEFAULT 1,
@@ -71,6 +73,7 @@ export async function initializeDatabase(): Promise<void> {
         employee_id    INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
         date           TEXT NOT NULL,
         status         TEXT NOT NULL DEFAULT 'Geldi',
+        work_hours     REAL DEFAULT 11,
         daily_wage     REAL NOT NULL DEFAULT 0,
         is_paid        INTEGER NOT NULL DEFAULT 0,
         paid_amount    REAL NOT NULL DEFAULT 0,
@@ -83,9 +86,29 @@ export async function initializeDatabase(): Promise<void> {
       );
     `);
 
-    // Ensure paid_amount column exists on attendances if table existed previously
+    // Ensure role column exists on employees
+    try {
+      await db.execute(`ALTER TABLE employees ADD COLUMN role TEXT DEFAULT '';`);
+    } catch {
+      // Column already exists
+    }
     try {
       await db.execute(`ALTER TABLE attendances ADD COLUMN paid_amount REAL DEFAULT 0;`);
+    } catch {
+      // Column already exists
+    }
+    try {
+      await db.execute(`ALTER TABLE attendances ADD COLUMN work_hours REAL DEFAULT 11;`);
+    } catch {
+      // Column already exists
+    }
+
+    // Ensure monthly_wage column exists on employees (migrate from daily_wage-only schema)
+    try {
+      await db.execute(`ALTER TABLE employees ADD COLUMN monthly_wage REAL NOT NULL DEFAULT 0;`);
+      // Populate monthly_wage from existing daily_wage for old records
+      await db.execute(`UPDATE employees SET monthly_wage = daily_wage * 30 WHERE monthly_wage = 0 AND daily_wage > 0;`);
+      console.log('✅ Added monthly_wage column to employees and populated from daily_wage');
     } catch {
       // Column already exists
     }

@@ -30,6 +30,7 @@ export async function GET(request: NextRequest) {
                 a.employee_id,
                 a.date,
                 a.status,
+                COALESCE(a.work_hours, CASE WHEN a.status = 'Gelmedi' THEN 0 WHEN a.status = 'Yarım Gün' THEN 5.5 ELSE 11 END) as work_hours,
                 a.daily_wage,
                 a.is_paid,
                 COALESCE(a.paid_amount, CASE WHEN a.is_paid = 1 THEN a.daily_wage ELSE 0 END) as paid_amount,
@@ -65,11 +66,13 @@ export async function GET(request: NextRequest) {
         e.id as employee_id,
         e.first_name,
         e.last_name,
+        e.monthly_wage as default_monthly_wage,
         e.daily_wage as default_daily_wage,
         e.is_active,
         a.id as attendance_id,
         a.date,
         a.status,
+        COALESCE(a.work_hours, CASE WHEN a.status = 'Gelmedi' THEN 0 WHEN a.status = 'Yarım Gün' THEN 5.5 ELSE 11 END) as work_hours,
         COALESCE(a.daily_wage, e.daily_wage) as daily_wage,
         COALESCE(a.is_paid, 0) as is_paid,
         COALESCE(a.paid_amount, CASE WHEN a.is_paid = 1 THEN COALESCE(a.daily_wage, e.daily_wage) ELSE 0 END) as paid_amount,
@@ -93,11 +96,13 @@ export async function GET(request: NextRequest) {
       employee_id: number;
       first_name: string;
       last_name: string;
+      default_monthly_wage: number;
       default_daily_wage: number;
       is_active: number;
       attendance_id: number | null;
       date: string | null;
       status: string | null;
+      work_hours: number;
       daily_wage: number;
       is_paid: number;
       paid_amount: number;
@@ -159,6 +164,7 @@ export async function POST(request: NextRequest) {
       records: Array<{
         employee_id: number;
         status?: string | null;
+        work_hours?: number | string | null;
         daily_wage?: number;
         is_paid?: boolean | number;
         paid_amount?: number;
@@ -262,13 +268,26 @@ export async function POST(request: NextRequest) {
           ? 'Gelmedi'
           : 'Geldi';
 
+      let workHours =
+        status === 'Gelmedi'
+          ? 0
+          : item.work_hours !== undefined && item.work_hours !== null && item.work_hours !== ''
+          ? Math.max(0, parseFloat(String(item.work_hours)))
+          : status === 'Mesai'
+          ? 16.5
+          : status === 'Yarım Gün'
+          ? 5.5
+          : 11;
+
       let effectiveWage =
         item.daily_wage !== undefined && item.daily_wage !== null
           ? Math.max(0, parseFloat(String(item.daily_wage)))
-          : status === 'Yarım Gün'
-          ? defaultWage / 2
+          : status === 'Gelmedi'
+          ? 0
           : status === 'Mesai'
           ? defaultWage * 1.5
+          : status === 'Yarım Gün'
+          ? defaultWage / 2
           : defaultWage;
 
       // Calculate paid_amount & is_paid
@@ -347,7 +366,7 @@ export async function POST(request: NextRequest) {
           const isPartial = paidAmount < effectiveWage;
           const statusLabel =
             status === 'Yarım Gün' ? ' (Yarım Gün)' : status === 'Mesai' ? ' (Mesai 1.5x)' : '';
-          const txDesc = `Maaş / Yevmiye${statusLabel} (${isPartial ? `Kısmi: ₺${paidAmount}` : 'Tam Ödeme'}): ${emp.first_name} ${emp.last_name} (${date})`;
+          const txDesc = `Maaş Ödemesi${statusLabel} (${isPartial ? `Kısmi: ₺${paidAmount}` : 'Tam Ödeme'}): ${emp.first_name} ${emp.last_name} (${date})`;
           const txResult = await db.execute({
             sql: `INSERT INTO transactions (type, category_id, account_id, currency, amount, transaction_date, description, created_by_user_id)
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -376,10 +395,11 @@ export async function POST(request: NextRequest) {
 
       // Upsert into attendances
       await db.execute({
-        sql: `INSERT INTO attendances (employee_id, date, status, daily_wage, is_paid, paid_amount, account_id, transaction_id, note, updated_at)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        sql: `INSERT INTO attendances (employee_id, date, status, work_hours, daily_wage, is_paid, paid_amount, account_id, transaction_id, note, updated_at)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
               ON CONFLICT(employee_id, date) DO UPDATE SET
                 status = excluded.status,
+                work_hours = excluded.work_hours,
                 daily_wage = excluded.daily_wage,
                 is_paid = excluded.is_paid,
                 paid_amount = excluded.paid_amount,
@@ -391,6 +411,7 @@ export async function POST(request: NextRequest) {
           item.employee_id,
           date,
           status,
+          workHours,
           effectiveWage,
           isPaid,
           paidAmount,

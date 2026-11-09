@@ -12,8 +12,8 @@ export async function GET() {
 
     const employeesRs = await db.execute(`
       SELECT 
-        e.id, e.first_name, e.last_name, e.daily_wage, e.phone, e.is_active, e.created_at,
-        COALESCE(SUM(CASE WHEN a.status = 'Geldi' THEN 1 WHEN a.status = 'Yarım Gün' THEN 0.5 WHEN a.status = 'Mesai' THEN 1.5 ELSE 0 END), 0) as total_days_worked,
+        e.id, e.first_name, e.last_name, COALESCE(e.role, '') as role, e.monthly_wage, e.daily_wage, e.phone, e.is_active, e.created_at,
+        COALESCE(SUM(CASE WHEN a.status IN ('Geldi', 'Yarım Gün', 'Mesai') THEN COALESCE(a.work_hours, CASE WHEN a.status = 'Yarım Gün' THEN 5.5 ELSE 11 END) ELSE 0 END), 0) as total_hours_worked,
         COALESCE(SUM(CASE WHEN a.status IN ('Geldi', 'Yarım Gün', 'Mesai') THEN a.daily_wage ELSE 0 END), 0) as total_earned,
         COALESCE(SUM(CASE WHEN a.status IN ('Geldi', 'Yarım Gün', 'Mesai') THEN (CASE WHEN a.paid_amount > 0 THEN a.paid_amount WHEN a.is_paid = 1 THEN a.daily_wage ELSE 0 END) ELSE 0 END), 0) as total_paid
       FROM employees e
@@ -26,20 +26,31 @@ export async function GET() {
       id: number;
       first_name: string;
       last_name: string;
+      role: string;
+      monthly_wage: number;
       daily_wage: number;
       phone: string | null;
       is_active: number;
       created_at: string;
-      total_days_worked: number;
+      total_hours_worked: number;
       total_earned: number;
       total_paid: number;
-    }>).map((emp) => ({
-      ...emp,
-      total_days_worked: Number(emp.total_days_worked),
-      total_earned: Number(emp.total_earned),
-      total_paid: Number(emp.total_paid),
-      balance_due: Number(emp.total_earned) - Number(emp.total_paid),
-    }));
+    }>).map((emp) => {
+      const monthly = Number(emp.monthly_wage) || 0;
+      const daily = Number(emp.daily_wage) || 0;
+      return {
+        ...emp,
+        role: emp.role || '',
+        monthly_wage: monthly,
+        daily_wage: daily,
+        hourly_wage: Math.round((daily / 11) * 100) / 100,
+        total_hours_worked: Number(emp.total_hours_worked),
+        total_days_worked: Number(emp.total_hours_worked), // keep backwards compatibility if any component reads this
+        total_earned: Number(emp.total_earned),
+        total_paid: Number(emp.total_paid),
+        balance_due: Number(emp.total_earned) - Number(emp.total_paid),
+      };
+    });
 
     return NextResponse.json({ employees });
   } catch (error) {
@@ -58,7 +69,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { first_name, last_name, daily_wage, phone } = body;
+    const { first_name, last_name, role, monthly_wage, phone } = body;
 
     if (!first_name || !last_name) {
       return NextResponse.json(
@@ -67,18 +78,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const wage = parseFloat(daily_wage) || 0;
-    if (wage < 0) {
+    const monthlyVal = parseFloat(monthly_wage) || 0;
+    if (monthlyVal < 0) {
       return NextResponse.json(
-        { error: 'Günlük yevmiye 0 veya daha büyük olmalıdır.' },
+        { error: 'Maaş 0 veya daha büyük olmalıdır.' },
         { status: 400 }
       );
     }
 
+    const dailyVal = Math.round((monthlyVal / 30) * 100) / 100;
+
     const db = getDb();
     const result = await db.execute({
-      sql: `INSERT INTO employees (first_name, last_name, daily_wage, phone) VALUES (?, ?, ?, ?)`,
-      args: [first_name.trim(), last_name.trim(), wage, phone?.trim() || null],
+      sql: `INSERT INTO employees (first_name, last_name, role, monthly_wage, daily_wage, phone) VALUES (?, ?, ?, ?, ?, ?)`,
+      args: [first_name.trim(), last_name.trim(), role?.trim() || '', monthlyVal, dailyVal, phone?.trim() || null],
     });
 
     const newEmpRs = await db.execute({

@@ -23,9 +23,12 @@ export async function GET(request: NextRequest) {
               e.id as employee_id,
               e.first_name,
               e.last_name,
+              COALESCE(e.role, '') as role,
+              e.monthly_wage as default_monthly_wage,
               e.daily_wage as default_daily_wage,
               e.is_active,
-              COALESCE(SUM(CASE WHEN a.status = 'Geldi' THEN 1 WHEN a.status = 'Yarım Gün' THEN 0.5 WHEN a.status = 'Mesai' THEN 1.5 ELSE 0 END), 0) as days_attended,
+              COALESCE(SUM(CASE WHEN a.status IN ('Geldi', 'Yarım Gün', 'Mesai') THEN COALESCE(a.work_hours, CASE WHEN a.status = 'Yarım Gün' THEN 5.5 ELSE 11 END) ELSE 0 END), 0) as total_hours_worked,
+              COALESCE(SUM(CASE WHEN a.status IN ('Geldi', 'Yarım Gün', 'Mesai') THEN 1 ELSE 0 END), 0) as days_attended,
               COALESCE(SUM(CASE WHEN a.status = 'Gelmedi' THEN 1 ELSE 0 END), 0) as days_absent,
               COALESCE(SUM(CASE WHEN a.status IN ('Geldi', 'Yarım Gün', 'Mesai') THEN a.daily_wage ELSE 0 END), 0) as total_earned,
               COALESCE(SUM(CASE WHEN a.status IN ('Geldi', 'Yarım Gün', 'Mesai') THEN (CASE WHEN a.paid_amount > 0 THEN a.paid_amount WHEN a.is_paid = 1 THEN a.daily_wage ELSE 0 END) ELSE 0 END), 0) as total_paid
@@ -41,8 +44,11 @@ export async function GET(request: NextRequest) {
       employee_id: number;
       first_name: string;
       last_name: string;
+      role: string;
+      default_monthly_wage: number;
       default_daily_wage: number;
       is_active: number;
+      total_hours_worked: number;
       days_attended: number;
       days_absent: number;
       total_earned: number;
@@ -51,6 +57,8 @@ export async function GET(request: NextRequest) {
 
     const employees = employeeSummaries.map((emp) => ({
       ...emp,
+      role: emp.role || '',
+      total_hours_worked: Number(emp.total_hours_worked),
       days_attended: Number(emp.days_attended),
       days_absent: Number(emp.days_absent),
       total_earned: Number(emp.total_earned),
@@ -62,6 +70,20 @@ export async function GET(request: NextRequest) {
     const totalEarned = employees.reduce((s, e) => s + Number(e.total_earned), 0);
     const totalPaid = employees.reduce((s, e) => s + Number(e.total_paid), 0);
     const totalDue = totalEarned - totalPaid;
+
+    // Also fetch individual day attendances for this month to include in daily/weekly breakdown
+    const dayAttendancesRs = await db.execute({
+      sql: `SELECT 
+              employee_id, 
+              date, 
+              status, 
+              COALESCE(work_hours, CASE WHEN status = 'Gelmedi' THEN 0 WHEN status = 'Yarım Gün' THEN 5.5 ELSE 11 END) as work_hours,
+              daily_wage, 
+              paid_amount 
+            FROM attendances 
+            WHERE date BETWEEN ? AND ?`,
+      args: [startDate, endDate],
+    });
 
     return NextResponse.json({
       month,
@@ -75,6 +97,7 @@ export async function GET(request: NextRequest) {
         totalDue,
       },
       employees,
+      attendances: dayAttendancesRs.rows,
     });
   } catch (error) {
     console.error('Salaries Summary GET error:', error);

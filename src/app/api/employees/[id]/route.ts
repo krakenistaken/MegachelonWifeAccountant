@@ -23,7 +23,7 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { first_name, last_name, daily_wage, phone, is_active } = body;
+    const { first_name, last_name, role, monthly_wage, phone, is_active } = body;
 
     const db = getDb();
     const existingRs = await db.execute({
@@ -33,6 +33,8 @@ export async function PUT(
     const existing = existingRs.rows[0] as unknown as {
       first_name: string;
       last_name: string;
+      role?: string;
+      monthly_wage: number;
       daily_wage: number;
       phone: string | null;
       is_active: number;
@@ -44,15 +46,22 @@ export async function PUT(
 
     const updatedFirstName = first_name !== undefined ? first_name.trim() : existing.first_name;
     const updatedLastName = last_name !== undefined ? last_name.trim() : existing.last_name;
-    const updatedWage = daily_wage !== undefined ? parseFloat(daily_wage) : existing.daily_wage;
+    const updatedRole = role !== undefined ? role.trim() : (existing.role || '');
+    
+    let updatedMonthly = existing.monthly_wage;
+    if (monthly_wage !== undefined && monthly_wage !== null && monthly_wage !== '') {
+      updatedMonthly = parseFloat(monthly_wage) || 0;
+    }
+    const updatedDaily = Math.round((updatedMonthly / 30) * 100) / 100;
+
     const updatedPhone = phone !== undefined ? phone?.trim() || null : existing.phone;
     const updatedActive = is_active !== undefined ? (is_active ? 1 : 0) : existing.is_active;
 
     await db.execute({
       sql: `UPDATE employees 
-            SET first_name = ?, last_name = ?, daily_wage = ?, phone = ?, is_active = ?
+            SET first_name = ?, last_name = ?, role = ?, monthly_wage = ?, daily_wage = ?, phone = ?, is_active = ?
             WHERE id = ?`,
-      args: [updatedFirstName, updatedLastName, updatedWage, updatedPhone, updatedActive, empId],
+      args: [updatedFirstName, updatedLastName, updatedRole, updatedMonthly, updatedDaily, updatedPhone, updatedActive, empId],
     });
 
     const updated = await db.execute({

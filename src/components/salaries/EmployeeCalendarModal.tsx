@@ -353,8 +353,16 @@ export default function EmployeeCalendarModal({
               <h3 className="text-base font-bold text-gray-900 leading-tight">
                 {employee.first_name} {employee.last_name}
               </h3>
-              <p className="text-xs text-gray-500 font-medium mt-0.5">
-                Günlük Yevmiye: <span className="font-bold text-gray-800">{formatCurrency(employee.daily_wage)}</span> · Yarım Gün: <span className="font-bold text-indigo-700">{formatCurrency(employee.daily_wage / 2)}</span> · Mesai (1.5x): <span className="font-bold text-purple-700">{formatCurrency(employee.daily_wage * 1.5)}</span>
+              <p className="text-xs text-gray-500 font-medium mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>Günlük: <strong className="text-gray-900">{formatCurrency(employee.daily_wage)}</strong></span>
+                <span>·</span>
+                <span title="Yevmiye ÷ 11 Saat">Saatlik (11s): <strong className="text-primary-700">{formatCurrency(employee.daily_wage / 11)}</strong></span>
+                <span>·</span>
+                <span title={`${monthTitle} (${daysInMonth} Gün) × Yevmiye`}>Aylık ({daysInMonth}g): <strong className="text-indigo-700">{formatCurrency(employee.daily_wage * daysInMonth)}</strong></span>
+                <span>·</span>
+                <span>Yarım: <strong className="text-indigo-600">{formatCurrency(employee.daily_wage / 2)}</strong></span>
+                <span>·</span>
+                <span>Mesai (1.5x): <strong className="text-purple-600">{formatCurrency(employee.daily_wage * 1.5)}</strong></span>
               </p>
             </div>
           </div>
@@ -779,6 +787,9 @@ export default function EmployeeCalendarModal({
                   <div>
                     <label className="block text-[11px] font-bold text-gray-700 mb-1">
                       Günlük Yevmiye Tutarı (₺)
+                      <span className="text-[10px] text-gray-500 font-normal ml-1.5">
+                        (Saatlik: {formatCurrency(dayForm.daily_wage / 11)})
+                      </span>
                     </label>
                     <input
                       type="number"

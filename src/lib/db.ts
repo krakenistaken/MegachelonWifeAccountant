@@ -23,7 +23,8 @@ export function getDb(): Client {
       if (!fs.existsSync(DB_DIR)) {
         fs.mkdirSync(DB_DIR, { recursive: true });
       }
-      const DB_PATH = path.join(DB_DIR, 'megachelon.db');
+      const dbName = process.env.DB_NAME || 'app.db';
+      const DB_PATH = path.join(DB_DIR, dbName);
       client = createClient({
         url: `file:${DB_PATH.replace(/\\/g, '/')}`,
       });

@@ -5,7 +5,7 @@ import './globals.css';
 const inter = Inter({ subsets: ['latin'] });
 
 export const metadata: Metadata = {
-  title: 'Megachelon Muhasebe | Gelir & Gider Yönetim Paneli',
+  title: 'Ön Muhasebe & Yönetim Paneli',
   description: 'Gelir ve gider işlemlerinizi kolayca yönetin. Gerçek zamanlı eşitleme, çoklu kasa ve para birimi desteği.',
 };
 

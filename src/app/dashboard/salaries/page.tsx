@@ -728,7 +728,7 @@ export default function SalariesPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Megachelon_Maas_Bordrosu_${monthlyData.month}.xlsx`;
+    a.download = `Maas_Bordrosu_${monthlyData.month}.xlsx`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -773,7 +773,7 @@ export default function SalariesPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Megachelon_Maas_Bordrosu_${monthlyData.month}.csv`;
+    a.download = `Maas_Bordrosu_${monthlyData.month}.csv`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -830,7 +830,7 @@ export default function SalariesPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Megachelon_Maas_Hareket_Gecmisi_${new Date().toISOString().split('T')[0]}.xlsx`;
+    a.download = `Maas_Hareket_Gecmisi_${new Date().toISOString().split('T')[0]}.xlsx`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);

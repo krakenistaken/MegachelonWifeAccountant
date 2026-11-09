@@ -4,7 +4,7 @@ import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 import { cookies } from 'next/headers';
 
 const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'megachelon-muhasebe-secret-key-change-in-production'
+  process.env.JWT_SECRET || 'app-muhasebe-secret-key-change-in-production'
 );
 
 const COOKIE_NAME = 'auth_token';

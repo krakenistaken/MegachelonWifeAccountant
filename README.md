@@ -1,4 +1,4 @@
-# Megachelon Accountant (Megachelon Ön Muhasebe & Maaş Takip Sistemi)
+# Ön Muhasebe & Maaş Takip Sistemi
 
 Modern, hızlı ve zengin özelliklere sahip tam kapsamlı işletme ön muhasebe ve personel maaş/yoklama yönetim sistemi.
 

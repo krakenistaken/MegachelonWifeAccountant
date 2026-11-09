@@ -112,8 +112,8 @@ export default function Sidebar({ username, isOpen, onClose }: SidebarProps) {
             </svg>
           </div>
           <div>
-            <h1 className="text-base font-bold text-gray-900 leading-tight">Megachelon</h1>
-            <p className="text-xs text-gray-500 font-medium">Muhasebe Paneli</p>
+            <h1 className="text-base font-bold text-gray-900 leading-tight">Ön Muhasebe</h1>
+            <p className="text-xs text-gray-500 font-medium">Yönetim Paneli</p>
           </div>
           {/* Mobile close */}
           <button

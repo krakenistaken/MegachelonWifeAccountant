@@ -131,7 +131,7 @@ export default function ReportsPage() {
           })),
           transactions: data.transactions,
         },
-        `Megachelon_Rapor_${data.period}_${data.dateFrom}_${data.dateTo}.xlsx`
+        `Muhasebe_Rapor_${data.period}_${data.dateFrom}_${data.dateTo}.xlsx`
       );
     } catch (err) {
       console.error('Export excel error:', err);
@@ -144,7 +144,7 @@ export default function ReportsPage() {
     if (!data || !data.transactions) return;
     exportTransactionsToCSV(
       data.transactions,
-      `Megachelon_Islemler_${data.period}_${data.dateFrom}_${data.dateTo}.csv`
+      `Muhasebe_Islemler_${data.period}_${data.dateFrom}_${data.dateTo}.csv`
     );
   };
 

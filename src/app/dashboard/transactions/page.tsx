@@ -65,14 +65,14 @@ export default function TransactionsPage() {
   const handleExportExcel = () => {
     exportTransactionsToExcel(
       transactions,
-      `Megachelon_Islemler_${filterType || 'Tumu'}_${new Date().toISOString().split('T')[0]}.xlsx`
+      `Muhasebe_Islemler_${filterType || 'Tumu'}_${new Date().toISOString().split('T')[0]}.xlsx`
     );
   };
 
   const handleExportCSV = () => {
     exportTransactionsToCSV(
       transactions,
-      `Megachelon_Islemler_${filterType || 'Tumu'}_${new Date().toISOString().split('T')[0]}.csv`
+      `Muhasebe_Islemler_${filterType || 'Tumu'}_${new Date().toISOString().split('T')[0]}.csv`
     );
   };
 

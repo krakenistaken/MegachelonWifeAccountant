@@ -6,6 +6,7 @@ import Modal from '@/components/ui/Modal';
 import EmployeeCalendarModal from '@/components/salaries/EmployeeCalendarModal';
 import { useRealtimeEvents } from '@/hooks/useRealtimeEvents';
 import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 
 interface Account {
   id: number;
@@ -450,9 +451,19 @@ export default function SalariesPage() {
           let updatedIsPaid = rec.is_paid;
           let updatedHours = rec.work_hours ?? 11;
 
+          const dObj = new Date(selectedDate);
+          const isSaturday = dObj.getDay() === 6;
+          const isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
+
           if (targetStatus === 'Mesai') {
             updatedHours = 11;
-            updatedWage = Math.round(rec.default_daily_wage * 1.5 * 100) / 100;
+            if (isSaturday) {
+              // Cumartesi ek mesai: 11 saatlik standart ücretin üzerine 11 saat mesai bedeli
+              const hourly = rec.default_daily_wage > 0 ? rec.default_daily_wage / 11 : 0;
+              updatedWage = Math.round((rec.default_daily_wage + (11 * hourly * 1.5)) * 100) / 100;
+            } else {
+              updatedWage = Math.round(rec.default_daily_wage * 1.5 * 100) / 100;
+            }
           } else if (targetStatus === 'Geldi') {
             updatedHours = 11;
             updatedWage = rec.default_daily_wage;
@@ -462,11 +473,22 @@ export default function SalariesPage() {
             if (updatedPaidAmount > updatedWage) {
               updatedPaidAmount = updatedWage;
             }
-          } else if (targetStatus === 'Gelmedi' || targetStatus === null) {
+          } else if (targetStatus === 'Gelmedi') {
             updatedHours = 0;
             updatedWage = 0;
             updatedPaidAmount = 0;
             updatedIsPaid = 0;
+          } else if (targetStatus === null) {
+            // Boş bırakıldığında: eğer hafta sonuysa standart ücretini koru
+            if (isWeekend) {
+              updatedHours = 11;
+              updatedWage = rec.default_daily_wage;
+            } else {
+              updatedHours = 0;
+              updatedWage = 0;
+              updatedPaidAmount = 0;
+              updatedIsPaid = 0;
+            }
           }
 
           return {
@@ -561,15 +583,26 @@ export default function SalariesPage() {
           let calculatedWage = 0;
           let newStatus = rec.status;
 
+          const dObj = new Date(selectedDate);
+          const isSaturday = dObj.getDay() === 6;
+
           if (hours === 0) {
             newStatus = 'Gelmedi';
             calculatedWage = 0;
           } else if (rec.status === 'Mesai') {
-            // Mesai seçiliyken saat bedeli 1.5 katı ile çarpılır
-            calculatedWage = Math.round(hours * (hourlyRate * 1.5) * 100) / 100;
+            // Mesai seçiliyken: Cumartesi ise standart 11 saat ücreti + mesai saatleri bedeli
+            if (isSaturday) {
+              calculatedWage = Math.round((rec.default_daily_wage + (hours * hourlyRate * 1.5)) * 100) / 100;
+            } else {
+              calculatedWage = Math.round(hours * (hourlyRate * 1.5) * 100) / 100;
+            }
           } else if (hours > 11) {
             newStatus = 'Mesai';
-            calculatedWage = Math.round(hours * (hourlyRate * 1.5) * 100) / 100;
+            if (isSaturday) {
+              calculatedWage = Math.round((rec.default_daily_wage + (hours * hourlyRate * 1.5)) * 100) / 100;
+            } else {
+              calculatedWage = Math.round(hours * (hourlyRate * 1.5) * 100) / 100;
+            }
           } else if (hours <= 6 && hours > 0) {
             newStatus = 'Yarım Gün';
             calculatedWage = Math.round(hours * hourlyRate * 100) / 100;
@@ -893,8 +926,8 @@ export default function SalariesPage() {
     }
   };
 
-  // Export Monthly Summary to Excel (Puantaj Formatı - Kağıttaki Çizelge Düzeni)
-  const handleExportMonthlyExcel = () => {
+  // Export Monthly Summary to Excel (Puantaj Formatı - Kağıttaki Çizelge Düzeni ve Hafta Sonu Renkleri)
+  const handleExportMonthlyExcel = async () => {
     if (!monthlyData || monthlyData.employees.length === 0) return;
 
     const [yearNum, monthNum] = monthlyData.month.split('-').map(Number);
@@ -908,37 +941,90 @@ export default function SalariesPage() {
       attMap.set(`${att.employee_id}_${att.date}`, att);
     });
 
-    // 1. Satır: Başlıklar (1, 2, 3... günlerin üstünde gün isimleri PAZ, PZT...)
-    // 2. Satır: Gün numaraları (1, 2, 3...)
-    // Satırlar: AD SOYAD, GÖREV, [1..days], TOPLAM SAAT, MAAŞ, HAKEDİŞ
-
-    const tableData: any[][] = [];
-
-    // Title Row
+    const workbook = new ExcelJS.Workbook();
     const titleMonthName = MONTH_NAMES[monthNum - 1]?.toLowerCase() || '';
-    tableData.push([`${titleMonthName} ayı puantaj MAAŞ`]);
+    const worksheet = workbook.addWorksheet(`Puantaj_${monthlyData.month}`);
 
-    // Row 1: Header names (AD SOYAD, GÖREV, PAZ, PZT..., TOPLAM SAAT, MAAŞ, HAKEDİŞ, ÖDENEN TUTAR, KALAN BORÇ)
-    const headerRow1: any[] = ['AD SOYAD', 'GÖREV'];
+    // Row 1: Title (Merged banner)
+    worksheet.mergeCells(1, 1, 1, 2 + selectedMonthDays + 5);
+    const titleCell = worksheet.getCell(1, 1);
+    titleCell.value = `${titleMonthName} ayı puantaj MAAŞ`;
+    titleCell.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FF000000' } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    worksheet.getRow(1).height = 24;
+
+    // Row 2: Days Names (AD SOYAD, GÖREV, PAZ, PZT..., TOPLAM SAAT, MAAŞ, HAKEDİŞ, ÖDENEN TUTAR, KALAN BORÇ)
+    const row2Values: any[] = ['AD SOYAD', 'GÖREV'];
     for (let day = 1; day <= selectedMonthDays; day++) {
       const dayDate = new Date(yearNum, monthNum - 1, day);
-      const dayName = DAY_NAMES_TR[dayDate.getDay()];
-      headerRow1.push(dayName);
+      row2Values.push(DAY_NAMES_TR[dayDate.getDay()]);
     }
-    headerRow1.push('TOPLAM SAAT', 'MAAŞ', 'HAKEDİŞ', 'ÖDENEN TUTAR', 'KALAN BORÇ');
-    tableData.push(headerRow1);
+    row2Values.push('TOPLAM SAAT', 'MAAŞ', 'HAKEDİŞ', 'ÖDENEN TUTAR', 'KALAN BORÇ');
+    const headerRow2 = worksheet.addRow(row2Values);
+    headerRow2.height = 20;
 
-    // Row 2: Day numbers (empty, empty, 1, 2, 3..., empty, empty, empty, empty, empty)
-    const headerRow2: any[] = ['', ''];
+    // Row 3: Day Numbers ('', '', 1, 2, 3...)
+    const row3Values: any[] = ['', ''];
     for (let day = 1; day <= selectedMonthDays; day++) {
-      headerRow2.push(day);
+      row3Values.push(day);
     }
-    headerRow2.push('', '', '', '', '');
-    tableData.push(headerRow2);
+    row3Values.push('', '', '', '', '');
+    const headerRow3 = worksheet.addRow(row3Values);
+    headerRow3.height = 18;
+
+    // Header styling
+    const headerFill: ExcelJS.FillPattern = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFE5E7EB' }, // Light gray
+    };
+    const weekendHeaderFill: ExcelJS.FillPattern = {
+      type: 'pattern',
+      pattern: 'solid',
+      fgColor: { argb: 'FFFDE047' }, // Sarı (Hafta sonu başlığı)
+    };
+
+    // Format Header Rows 2 & 3
+    for (let colIdx = 1; colIdx <= 2 + selectedMonthDays + 5; colIdx++) {
+      const isDayCol = colIdx >= 3 && colIdx <= 2 + selectedMonthDays;
+      let isWeekend = false;
+      if (isDayCol) {
+        const day = colIdx - 2;
+        const d = new Date(yearNum, monthNum - 1, day);
+        isWeekend = d.getDay() === 0 || d.getDay() === 6; // Paz (0) or Cmt (6)
+      }
+
+      [headerRow2, headerRow3].forEach((r) => {
+        const cell = r.getCell(colIdx);
+        cell.font = { name: 'Arial', size: 9, bold: true };
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FF9CA3AF' } },
+          left: { style: 'thin', color: { argb: 'FF9CA3AF' } },
+          bottom: { style: 'thin', color: { argb: 'FF9CA3AF' } },
+          right: { style: 'thin', color: { argb: 'FF9CA3AF' } },
+        };
+        cell.fill = isWeekend ? weekendHeaderFill : headerFill;
+      });
+    }
+
+    // Merge A2:A3 (AD SOYAD) and B2:B3 (GÖREV)
+    worksheet.mergeCells('A2:A3');
+    worksheet.mergeCells('B2:B3');
+    const totalColLetter = worksheet.getColumn(2 + selectedMonthDays + 1).letter;
+    const maasColLetter = worksheet.getColumn(2 + selectedMonthDays + 2).letter;
+    const hakedisColLetter = worksheet.getColumn(2 + selectedMonthDays + 3).letter;
+    const odenenColLetter = worksheet.getColumn(2 + selectedMonthDays + 4).letter;
+    const kalanColLetter = worksheet.getColumn(2 + selectedMonthDays + 5).letter;
+    worksheet.mergeCells(`${totalColLetter}2:${totalColLetter}3`);
+    worksheet.mergeCells(`${maasColLetter}2:${maasColLetter}3`);
+    worksheet.mergeCells(`${hakedisColLetter}2:${hakedisColLetter}3`);
+    worksheet.mergeCells(`${odenenColLetter}2:${odenenColLetter}3`);
+    worksheet.mergeCells(`${kalanColLetter}2:${kalanColLetter}3`);
 
     // Employee Rows
     monthlyData.employees.forEach((e) => {
-      const row: any[] = [
+      const rowValues: any[] = [
         `${e.first_name} ${e.last_name}`,
         e.role || '—',
       ];
@@ -949,51 +1035,108 @@ export default function SalariesPage() {
         const dateStr = `${monthlyData.month}-${dayStr}`;
         const dayDate = new Date(yearNum, monthNum - 1, day);
         const isSunday = dayDate.getDay() === 0;
+        const isSaturday = dayDate.getDay() === 6;
 
         const att = attMap.get(`${e.employee_id}_${dateStr}`);
         if (att) {
           const hours = Number(att.work_hours ?? (att.status === 'Gelmedi' ? 0 : 11));
-          if (hours > 0) {
-            row.push(hours);
+          if (att.status === 'Gelmedi') {
+            rowValues.push(0);
+          } else if (isSaturday && att.status === 'Mesai') {
+            // Cumartesi mesaisi: HS + ek saat
+            rowValues.push(hours > 0 ? `HS+${hours}s` : 'HS');
+            totalMonthHours += (11 + hours);
+          } else if (hours > 0) {
+            rowValues.push(hours);
             totalMonthHours += hours;
           } else {
-            row.push(isSunday ? 'HF' : 0);
+            rowValues.push((isSunday || isSaturday) ? 'HS' : 0);
+            if (isSunday || isSaturday) totalMonthHours += 11;
           }
         } else {
-          // No attendance recorded: if Sunday show 'HF' (Hafta Tatili), else empty
-          row.push(isSunday ? 'HF' : '');
+          // No record: weekends are default HS (11h)
+          if (isSunday || isSaturday) {
+            rowValues.push('HS');
+            totalMonthHours += 11;
+          } else {
+            rowValues.push('');
+          }
         }
       }
 
       const monthlyWage = e.default_monthly_wage || calcMonthlyWage(e.default_daily_wage);
       const remainingDue = Number(e.total_earned || 0) - Number(e.total_paid || 0);
-      row.push(totalMonthHours, monthlyWage, e.total_earned, e.total_paid, remainingDue);
-      tableData.push(row);
+
+      rowValues.push(
+        totalMonthHours,
+        monthlyWage,
+        e.total_earned,
+        e.total_paid,
+        remainingDue
+      );
+
+      const dataRow = worksheet.addRow(rowValues);
+      dataRow.height = 19;
+
+      // Style data cells
+      for (let colIdx = 1; colIdx <= 2 + selectedMonthDays + 5; colIdx++) {
+        const cell = dataRow.getCell(colIdx);
+        cell.font = { name: 'Arial', size: 9 };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          left: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          bottom: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+          right: { style: 'thin', color: { argb: 'FFE5E7EB' } },
+        };
+
+        const isNameCol = colIdx === 1 || colIdx === 2;
+        const isDayCol = colIdx >= 3 && colIdx <= 2 + selectedMonthDays;
+        const isStatsCol = colIdx > 2 + selectedMonthDays;
+
+        if (isNameCol) {
+          cell.alignment = { horizontal: 'left', vertical: 'middle' };
+          if (colIdx === 1) cell.font = { name: 'Arial', size: 9, bold: true };
+        } else {
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        }
+
+        // Highlight weekend columns in yellow
+        if (isDayCol) {
+          const day = colIdx - 2;
+          const d = new Date(yearNum, monthNum - 1, day);
+          const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+          if (isWeekend) {
+            cell.fill = {
+              type: 'pattern',
+              pattern: 'solid',
+              fgColor: { argb: 'FFFEF08A' }, // Yumuşak Sarı (Hafta sonu dolgusu)
+            };
+            cell.font = { name: 'Arial', size: 9, bold: true, color: { argb: 'FF854D0E' } };
+          }
+        }
+
+        if (isStatsCol) {
+          cell.font = { name: 'Arial', size: 9, bold: true };
+          if (colIdx >= 2 + selectedMonthDays + 2) {
+            cell.numFmt = '#,##0.00 ₺';
+          }
+        }
+      }
     });
 
-    const worksheet = XLSX.utils.aoa_to_sheet(tableData);
-
-    // Set column widths
-    const colWidths = [
-      { wch: 22 }, // AD SOYAD
-      { wch: 14 }, // GÖREV
-    ];
+    // Column widths
+    worksheet.getColumn(1).width = 24; // AD SOYAD
+    worksheet.getColumn(2).width = 16; // GÖREV
     for (let day = 1; day <= selectedMonthDays; day++) {
-      colWidths.push({ wch: 5.5 }); // Days
+      worksheet.getColumn(2 + day).width = 6.2;
     }
-    colWidths.push(
-      { wch: 14 }, // TOPLAM SAAT
-      { wch: 12 }, // MAAŞ
-      { wch: 14 }, // HAKEDİŞ
-      { wch: 16 }, // ÖDENEN TUTAR
-      { wch: 16 }  // KALAN BORÇ
-    );
-    worksheet['!cols'] = colWidths;
+    worksheet.getColumn(2 + selectedMonthDays + 1).width = 14; // TOPLAM SAAT
+    worksheet.getColumn(2 + selectedMonthDays + 2).width = 14; // MAAŞ
+    worksheet.getColumn(2 + selectedMonthDays + 3).width = 15; // HAKEDİŞ
+    worksheet.getColumn(2 + selectedMonthDays + 4).width = 15; // ÖDENEN TUTAR
+    worksheet.getColumn(2 + selectedMonthDays + 5).width = 15; // KALAN BORÇ
 
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, `Puantaj_${monthlyData.month}`);
-
-    const buffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+    const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     });

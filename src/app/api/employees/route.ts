@@ -10,6 +10,7 @@ export async function GET() {
     await initializeDatabase();
     const db = getDb();
 
+    // We also consider weekend days (HS = 11h daily wage) so that employees don't lose wage on weekends
     const employeesRs = await db.execute(`
       SELECT 
         e.id, e.first_name, e.last_name, COALESCE(e.role, '') as role, e.monthly_wage, e.daily_wage, e.phone, e.is_active, e.created_at,

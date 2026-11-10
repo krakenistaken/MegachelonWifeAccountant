@@ -259,6 +259,7 @@ export async function POST(request: NextRequest) {
 
       // CASE 2: Status is Geldi, Yarım Gün, Mesai, or Gelmedi
       const defaultWage = Number(emp.daily_wage);
+      const hourlyRate = defaultWage > 0 ? defaultWage / 11 : 0;
       const status: 'Geldi' | 'Yarım Gün' | 'Mesai' | 'Gelmedi' =
         rawStatus === 'Yarım Gün'
           ? 'Yarım Gün'
@@ -268,27 +269,39 @@ export async function POST(request: NextRequest) {
           ? 'Gelmedi'
           : 'Geldi';
 
+      const dateObj = new Date(date);
+      const isWeekendDay = dateObj.getDay() === 0 || dateObj.getDay() === 6; // 0: Paz, 6: Cmt
+      const isSaturday = dateObj.getDay() === 6;
+
       let workHours =
         status === 'Gelmedi'
           ? 0
           : item.work_hours !== undefined && item.work_hours !== null && item.work_hours !== ''
           ? Math.max(0, parseFloat(String(item.work_hours)))
           : status === 'Mesai'
-          ? 16.5
+          ? 11
           : status === 'Yarım Gün'
           ? 5.5
           : 11;
 
-      let effectiveWage =
-        item.daily_wage !== undefined && item.daily_wage !== null
-          ? Math.max(0, parseFloat(String(item.daily_wage)))
-          : status === 'Gelmedi'
-          ? 0
-          : status === 'Mesai'
-          ? defaultWage * 1.5
-          : status === 'Yarım Gün'
-          ? defaultWage / 2
-          : defaultWage;
+      let effectiveWage = 0;
+      if (item.daily_wage !== undefined && item.daily_wage !== null) {
+        effectiveWage = Math.max(0, parseFloat(String(item.daily_wage)));
+      } else {
+        if (status === 'Gelmedi') {
+          effectiveWage = 0;
+        } else if (isSaturday && status === 'Mesai') {
+          // Cumartesi ek mesai: 11 saatlik standart ücretin üzerine mesai saati bedeli (saat * saatlik * 1.5)
+          effectiveWage = Math.round((defaultWage + (workHours * hourlyRate * 1.5)) * 100) / 100;
+        } else if (status === 'Mesai') {
+          effectiveWage = Math.round(workHours * (hourlyRate * 1.5) * 100) / 100;
+        } else if (status === 'Yarım Gün') {
+          effectiveWage = Math.round(workHours * hourlyRate * 100) / 100;
+        } else {
+          // Normal 'Geldi'
+          effectiveWage = defaultWage;
+        }
+      }
 
       // Calculate paid_amount & is_paid
       let paidAmount = 0;

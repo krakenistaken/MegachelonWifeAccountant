@@ -168,17 +168,37 @@ export default function EmployeeCalendarModal({
   const mesaiDays = records.filter((r) => r.status === 'Mesai');
   const absentDays = records.filter((r) => r.status === 'Gelmedi');
 
-  const totalEarned = workingDays.reduce((s, r) => s + r.daily_wage, 0);
-  const totalPaid = workingDays.reduce(
-    (s, r) =>
-      s +
-      (r.paid_amount !== undefined
-        ? r.paid_amount
-        : r.is_paid === 1
-        ? r.daily_wage
-        : 0),
-    0
-  );
+    // Count weekends without explicit Gelmedi as earned days
+    let weekendEarned = 0;
+    let weekendHours = 0;
+    let weekendAttendedCount = 0;
+
+    for (let day = 1; day <= daysInMonth; day++) {
+      const dateIso = `${yearNum}-${String(monthNum).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const d = new Date(yearNum, monthNum - 1, day);
+      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+      if (isWeekend) {
+        const rec = recordMap.get(dateIso);
+        if (!rec) {
+          // No record: automatically earned (HS)
+          weekendEarned += employee.daily_wage;
+          weekendHours += 11;
+          weekendAttendedCount += 1;
+        }
+      }
+    }
+
+    const totalEarned = workingDays.reduce((s, r) => s + r.daily_wage, 0) + weekendEarned;
+    const totalPaid = workingDays.reduce(
+      (s, r) =>
+        s +
+        (r.paid_amount !== undefined
+          ? r.paid_amount
+          : r.is_paid === 1
+          ? r.daily_wage
+          : 0),
+      0
+    );
   const fullPaidDays = workingDays.filter((r) => {
     const p =
       r.paid_amount !== undefined
@@ -638,6 +658,11 @@ export default function EmployeeCalendarModal({
               const hasRecord = !!record;
               const isMultiSelected = selectedDates.includes(dateIso);
 
+              const dayOfWeek = new Date(yearNum, monthNum - 1, dayNum).getDay();
+              const isWeekend = dayOfWeek === 0 || dayOfWeek === 6; // 0 Paz, 6 Cmt
+              const isSaturday = dayOfWeek === 6;
+              const isSunday = dayOfWeek === 0;
+
               return (
                 <div
                   key={dateIso}
@@ -672,11 +697,13 @@ export default function EmployeeCalendarModal({
                         ? 'bg-amber-500 text-white border-amber-600 shadow-sm shadow-amber-500/25 hover:scale-[1.02]'
                         : isAbsent
                         ? 'bg-rose-500 text-white border-rose-600 shadow-sm shadow-rose-500/20 hover:scale-[1.02]'
+                        : isWeekend
+                        ? 'bg-amber-100/70 border-amber-300/80 text-amber-950 hover:bg-amber-100 hover:border-amber-400 shadow-xs'
                         : 'bg-gray-50/80 border-gray-100 text-gray-700 hover:bg-gray-100/90 hover:border-gray-200'
                     }
                     ${isToday ? 'border-2 border-primary-500' : ''}
                   `}
-                  title={`${dayNum} ${monthTitle} - Tıklayarak yoklamasını düzenleyin`}
+                  title={`${dayNum} ${monthTitle} ${isWeekend ? '(Hafta Sonu)' : ''} - Tıklayarak yoklamasını düzenleyin`}
                 >
                   {/* Top: Day Number & Indicator */}
                   <div className="flex items-center justify-between">
@@ -691,17 +718,21 @@ export default function EmployeeCalendarModal({
                       )}
                       <span
                         className={`text-xs sm:text-sm font-extrabold ${
-                          hasRecord ? 'text-white' : 'text-gray-700'
+                          hasRecord ? 'text-white' : isWeekend ? 'text-amber-900' : 'text-gray-700'
                         }`}
                       >
                         {dayNum}
                       </span>
                     </div>
-                    {isWorking && (
+                    {isWorking ? (
                       <span className="text-[10px] font-black px-1 rounded bg-black/20 text-white">
                         {workHrs}s
                       </span>
-                    )}
+                    ) : isWeekend && !isAbsent ? (
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-amber-200/90 text-amber-900 border border-amber-300">
+                        HS (11s)
+                      </span>
+                    ) : null}
                     {isToday && !isWorking && (
                       <span className="w-1.5 h-1.5 rounded-full bg-primary-400 animate-pulse" />
                     )}
@@ -712,7 +743,7 @@ export default function EmployeeCalendarModal({
                     {isMesai ? (
                       <div className="space-y-0.5">
                         <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] font-black bg-white/25 text-white backdrop-blur-xs">
-                          ⚡ Mesai
+                          ⚡ {isSaturday ? 'Cmt Mesai' : 'Mesai'}
                         </span>
                         <div className="hidden sm:block text-[9px] font-bold text-purple-100 truncate">
                           ₺{record?.daily_wage} {isFullPaid ? '(Ödendi)' : ''}
@@ -749,6 +780,15 @@ export default function EmployeeCalendarModal({
                       <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] sm:text-xs font-black bg-white/20 text-white backdrop-blur-xs">
                         ✗ Gelmedi
                       </span>
+                    ) : isWeekend ? (
+                      <div className="space-y-0.5">
+                        <span className="inline-flex items-center justify-center px-1.5 py-0.5 rounded-md text-[10px] font-black bg-amber-500 text-white">
+                          HS Tatil
+                        </span>
+                        <div className="hidden sm:block text-[9px] font-bold text-amber-800">
+                          {isSaturday ? '+ Mesai Yaz' : 'Hafta Tatili'}
+                        </div>
+                      </div>
                     ) : (
                       <span className="text-[10px] text-gray-400 group-hover:text-primary-600 font-medium">
                         + Yoklama Gir
@@ -1010,7 +1050,17 @@ export default function EmployeeCalendarModal({
                     onClick={() => {
                       const hourlyRate = employee.daily_wage > 0 ? employee.daily_wage / 11 : 0;
                       const hrs = dayForm.work_hours > 0 ? dayForm.work_hours : 11;
-                      const mesaiWage = Math.round(hrs * (hourlyRate * 1.5) * 100) / 100;
+                      const dObj = selectedDayDate ? new Date(selectedDayDate) : null;
+                      const isSat = dObj?.getDay() === 6;
+
+                      // Cumartesi mesaisi: 11 saatlik standart ücretin üzerine ek mesai bedeli
+                      let mesaiWage = 0;
+                      if (isSat) {
+                        mesaiWage = Math.round((employee.daily_wage + (hrs * hourlyRate * 1.5)) * 100) / 100;
+                      } else {
+                        mesaiWage = Math.round(hrs * (hourlyRate * 1.5) * 100) / 100;
+                      }
+
                       setDayForm({
                         ...dayForm,
                         status: 'Mesai',
@@ -1091,8 +1141,21 @@ export default function EmployeeCalendarModal({
                       onChange={(e) => {
                         const hrs = Math.max(0, parseFloat(e.target.value) || 0);
                         const hourlyRate = employee.daily_wage > 0 ? employee.daily_wage / 11 : 0;
-                        const mult = dayForm.status === 'Mesai' ? 1.5 : 1.0;
-                        const w = Math.round(hrs * (hourlyRate * mult) * 100) / 100;
+                        const dObj = selectedDayDate ? new Date(selectedDayDate) : null;
+                        const isSat = dObj?.getDay() === 6;
+
+                        let w = 0;
+                        if (dayForm.status === 'Mesai') {
+                          if (isSat) {
+                            // Cumartesi mesaisi: standart günlük ücret + ek mesai saatleri bedeli
+                            w = Math.round((employee.daily_wage + (hrs * hourlyRate * 1.5)) * 100) / 100;
+                          } else {
+                            w = Math.round(hrs * (hourlyRate * 1.5) * 100) / 100;
+                          }
+                        } else {
+                          w = Math.round(hrs * hourlyRate * 100) / 100;
+                        }
+
                         setDayForm({
                           ...dayForm,
                           work_hours: hrs,

@@ -18,60 +18,15 @@ export async function GET(request: NextRequest) {
     const lastDayOfMonth = new Date(y, m, 0).getDate();
     const endDate = `${month}-${String(lastDayOfMonth).padStart(2, '0')}`;
 
-    const empRs = await db.execute({
-      sql: `SELECT 
-              e.id as employee_id,
-              e.first_name,
-              e.last_name,
-              COALESCE(e.role, '') as role,
-              e.monthly_wage as default_monthly_wage,
-              e.daily_wage as default_daily_wage,
-              e.is_active,
-              COALESCE(SUM(CASE WHEN a.status IN ('Geldi', 'Yarım Gün', 'Mesai') THEN COALESCE(a.work_hours, CASE WHEN a.status = 'Yarım Gün' THEN 5.5 ELSE 11 END) ELSE 0 END), 0) as total_hours_worked,
-              COALESCE(SUM(CASE WHEN a.status IN ('Geldi', 'Yarım Gün', 'Mesai') THEN 1 ELSE 0 END), 0) as days_attended,
-              COALESCE(SUM(CASE WHEN a.status = 'Gelmedi' THEN 1 ELSE 0 END), 0) as days_absent,
-              COALESCE(SUM(CASE WHEN a.status IN ('Geldi', 'Yarım Gün', 'Mesai') THEN a.daily_wage ELSE 0 END), 0) as total_earned,
-              COALESCE(SUM(CASE WHEN a.status IN ('Geldi', 'Yarım Gün', 'Mesai') THEN (CASE WHEN a.paid_amount > 0 THEN a.paid_amount WHEN a.is_paid = 1 THEN a.daily_wage ELSE 0 END) ELSE 0 END), 0) as total_paid
-            FROM employees e
-            LEFT JOIN attendances a ON e.id = a.employee_id AND a.date BETWEEN ? AND ?
-            WHERE e.is_active = 1 OR a.id IS NOT NULL
-            GROUP BY e.id
-            ORDER BY e.first_name ASC, e.last_name ASC`,
-      args: [startDate, endDate],
+    // Fetch active employees
+    const empBaseRs = await db.execute({
+      sql: `SELECT id, first_name, last_name, COALESCE(role, '') as role, monthly_wage, daily_wage, is_active
+            FROM employees
+            WHERE is_active = 1
+            ORDER BY first_name ASC, last_name ASC`,
     });
 
-    const employeeSummaries = empRs.rows as unknown as Array<{
-      employee_id: number;
-      first_name: string;
-      last_name: string;
-      role: string;
-      default_monthly_wage: number;
-      default_daily_wage: number;
-      is_active: number;
-      total_hours_worked: number;
-      days_attended: number;
-      days_absent: number;
-      total_earned: number;
-      total_paid: number;
-    }>;
-
-    const employees = employeeSummaries.map((emp) => ({
-      ...emp,
-      role: emp.role || '',
-      total_hours_worked: Number(emp.total_hours_worked),
-      days_attended: Number(emp.days_attended),
-      days_absent: Number(emp.days_absent),
-      total_earned: Number(emp.total_earned),
-      total_paid: Number(emp.total_paid),
-      balance_due: Number(emp.total_earned) - Number(emp.total_paid),
-    }));
-
-    const totalDaysAttended = employees.reduce((s, e) => s + Number(e.days_attended), 0);
-    const totalEarned = employees.reduce((s, e) => s + Number(e.total_earned), 0);
-    const totalPaid = employees.reduce((s, e) => s + Number(e.total_paid), 0);
-    const totalDue = totalEarned - totalPaid;
-
-    // Also fetch individual day attendances for this month to include in daily/weekly breakdown
+    // Also fetch individual day attendances for this month
     const dayAttendancesRs = await db.execute({
       sql: `SELECT 
               employee_id, 
@@ -85,6 +40,105 @@ export async function GET(request: NextRequest) {
       args: [startDate, endDate],
     });
 
+    const attendances = dayAttendancesRs.rows as unknown as Array<{
+      employee_id: number;
+      date: string;
+      status: string;
+      work_hours: number;
+      daily_wage: number;
+      paid_amount: number;
+    }>;
+
+    // Group attendances by employee
+    const attByEmp = new Map<number, Map<string, typeof attendances[0]>>();
+    for (const a of attendances) {
+      if (!attByEmp.has(a.employee_id)) {
+        attByEmp.set(a.employee_id, new Map());
+      }
+      attByEmp.get(a.employee_id)!.set(a.date, a);
+    }
+
+    // Build list of all dates in month
+    const allDatesInMonth: { dateStr: string; isWeekend: boolean; isSunday: boolean; isSaturday: boolean }[] = [];
+    for (let day = 1; day <= lastDayOfMonth; day++) {
+      const dayStr = String(day).padStart(2, '0');
+      const dateStr = `${month}-${dayStr}`;
+      const d = new Date(y, m - 1, day);
+      const dayOfWeek = d.getDay();
+      allDatesInMonth.push({
+        dateStr,
+        isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
+        isSunday: dayOfWeek === 0,
+        isSaturday: dayOfWeek === 6,
+      });
+    }
+
+    // Compute employee monthly stats ensuring weekends (HS) are counted as earned unless explicitly absent
+    const employees = (empBaseRs.rows as unknown as Array<{
+      id: number;
+      first_name: string;
+      last_name: string;
+      role: string;
+      monthly_wage: number;
+      daily_wage: number;
+      is_active: number;
+    }>).map((emp) => {
+      const empAttMap = attByEmp.get(emp.id) || new Map<string, typeof attendances[0]>();
+      const defaultDaily = Number(emp.daily_wage) || 0;
+      const hourlyRate = defaultDaily > 0 ? defaultDaily / 11 : 0;
+
+      let totalEarned = 0;
+      let totalPaid = 0;
+      let totalHours = 0;
+      let daysAttended = 0;
+      let daysAbsent = 0;
+
+      for (const d of allDatesInMonth) {
+        const att = empAttMap.get(d.dateStr);
+
+        if (att) {
+          if (att.status === 'Gelmedi') {
+            daysAbsent += 1;
+            // Gelmedi -> 0 wage earned
+          } else if (att.status === 'Geldi' || att.status === 'Yarım Gün' || att.status === 'Mesai') {
+            daysAttended += 1;
+            totalEarned += Number(att.daily_wage || 0);
+            totalPaid += Number(att.paid_amount || 0);
+            totalHours += Number(att.work_hours || 0);
+          }
+        } else {
+          // No explicit record entered for this day
+          if (d.isWeekend) {
+            // Hafta sonu (Cumartesi ve Pazar): Otomatik HS (Hafta Tatili) sayılır, 11 saatlik standart ücret hakedilir
+            totalEarned += defaultDaily;
+            totalHours += 11;
+            daysAttended += 1;
+          }
+        }
+      }
+
+      return {
+        employee_id: emp.id,
+        first_name: emp.first_name,
+        last_name: emp.last_name,
+        role: emp.role || '',
+        default_monthly_wage: Number(emp.monthly_wage) || defaultDaily * 30,
+        default_daily_wage: defaultDaily,
+        is_active: emp.is_active,
+        total_hours_worked: totalHours,
+        days_attended: daysAttended,
+        days_absent: daysAbsent,
+        total_earned: Math.round(totalEarned * 100) / 100,
+        total_paid: Math.round(totalPaid * 100) / 100,
+        balance_due: Math.round((totalEarned - totalPaid) * 100) / 100,
+      };
+    });
+
+    const totalDaysAttended = employees.reduce((s, e) => s + Number(e.days_attended), 0);
+    const totalEarned = employees.reduce((s, e) => s + Number(e.total_earned), 0);
+    const totalPaid = employees.reduce((s, e) => s + Number(e.total_paid), 0);
+    const totalDue = totalEarned - totalPaid;
+
     return NextResponse.json({
       month,
       startDate,
@@ -97,7 +151,7 @@ export async function GET(request: NextRequest) {
         totalDue,
       },
       employees,
-      attendances: dayAttendancesRs.rows,
+      attendances,
     });
   } catch (error) {
     console.error('Salaries Summary GET error:', error);

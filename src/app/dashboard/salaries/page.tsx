@@ -1033,33 +1033,40 @@ export default function SalariesPage() {
       ];
 
       let totalMonthHours = 0;
+      const todayIsoStr = new Date().toISOString().split('T')[0];
+
       for (let day = 1; day <= selectedMonthDays; day++) {
         const dayStr = String(day).padStart(2, '0');
         const dateStr = `${monthlyData.month}-${dayStr}`;
         const dayDate = new Date(yearNum, monthNum - 1, day);
         const isSunday = dayDate.getDay() === 0;
         const isSaturday = dayDate.getDay() === 6;
+        const isWeekend = isSunday || isSaturday;
+        const isPastOrToday = dateStr <= todayIsoStr;
 
         const att = attMap.get(`${e.employee_id}_${dateStr}`);
         if (att) {
           const hours = Number(att.work_hours ?? (att.status === 'Gelmedi' ? 0 : 11));
           if (att.status === 'Gelmedi') {
             rowValues.push(0);
-          } else if (isSaturday && att.status === 'Mesai') {
-            // Cumartesi mesaisi: HS + ek saat
-            rowValues.push(hours > 0 ? `HS+${hours}s` : 'HS');
-            totalMonthHours += (11 + hours);
+          } else if (isWeekend && att.status === 'Mesai') {
+            // Hafta sonu mesaisi: o gün çalışılan saat (örn. 11, 12, 13 saat)
+            rowValues.push(hours);
+            totalMonthHours += hours;
           } else if (hours > 0) {
             rowValues.push(hours);
             totalMonthHours += hours;
           } else {
-            rowValues.push((isSunday || isSaturday) ? 'HS' : 0);
-            if (isSunday || isSaturday) totalMonthHours += 11;
+            // Hafta sonu ise 11 saat
+            rowValues.push(isWeekend ? 11 : 0);
+            if (isWeekend) totalMonthHours += 11;
           }
         } else {
-          // No record: weekends are default HS (11h)
-          if (isSunday || isSaturday) {
-            rowValues.push('HS');
+          // Henüz yoklama girilmemiş:
+          // Eğer geçmişteki/bugünkü bir hafta sonuysa standart 11 saat
+          // Eğer gelecekteki bir günse (haftaya vs.) boş bırakılır (kafadan para/saat yazılmaz)
+          if (isWeekend && isPastOrToday) {
+            rowValues.push(11);
             totalMonthHours += 11;
           } else {
             rowValues.push('');

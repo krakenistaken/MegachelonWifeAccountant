@@ -168,19 +168,20 @@ export default function EmployeeCalendarModal({
   const mesaiDays = records.filter((r) => r.status === 'Mesai');
   const absentDays = records.filter((r) => r.status === 'Gelmedi');
 
-    // Count weekends without explicit Gelmedi as earned days
+    // Count past/current weekends without explicit Gelmedi as earned days
     let weekendEarned = 0;
     let weekendHours = 0;
     let weekendAttendedCount = 0;
+    const nowIso = new Date().toISOString().split('T')[0];
 
     for (let day = 1; day <= daysInMonth; day++) {
       const dateIso = `${yearNum}-${String(monthNum).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
       const d = new Date(yearNum, monthNum - 1, day);
       const isWeekend = d.getDay() === 0 || d.getDay() === 6;
-      if (isWeekend) {
+      if (isWeekend && dateIso <= nowIso) {
         const rec = recordMap.get(dateIso);
         if (!rec) {
-          // No record: automatically earned (HS)
+          // No record entered: if it is already past or today, earned (HS)
           weekendEarned += employee.daily_wage;
           weekendHours += 11;
           weekendAttendedCount += 1;

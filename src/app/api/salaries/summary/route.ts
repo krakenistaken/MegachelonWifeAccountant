@@ -58,8 +58,11 @@ export async function GET(request: NextRequest) {
       attByEmp.get(a.employee_id)!.set(a.date, a);
     }
 
+    // Today's date to check whether a day is in the past or future
+    const todayStr = new Date().toISOString().split('T')[0];
+
     // Build list of all dates in month
-    const allDatesInMonth: { dateStr: string; isWeekend: boolean; isSunday: boolean; isSaturday: boolean }[] = [];
+    const allDatesInMonth: { dateStr: string; isWeekend: boolean; isSunday: boolean; isSaturday: boolean; isPastOrToday: boolean }[] = [];
     for (let day = 1; day <= lastDayOfMonth; day++) {
       const dayStr = String(day).padStart(2, '0');
       const dateStr = `${month}-${dayStr}`;
@@ -70,10 +73,11 @@ export async function GET(request: NextRequest) {
         isWeekend: dayOfWeek === 0 || dayOfWeek === 6,
         isSunday: dayOfWeek === 0,
         isSaturday: dayOfWeek === 6,
+        isPastOrToday: dateStr <= todayStr,
       });
     }
 
-    // Compute employee monthly stats ensuring weekends (HS) are counted as earned unless explicitly absent
+    // Compute employee monthly stats ensuring weekends (HS) are counted as earned only if the day has passed/occurred
     const employees = (empBaseRs.rows as unknown as Array<{
       id: number;
       first_name: string;
@@ -108,8 +112,9 @@ export async function GET(request: NextRequest) {
           }
         } else {
           // No explicit record entered for this day
-          if (d.isWeekend) {
-            // Hafta sonu (Cumartesi ve Pazar): Otomatik HS (Hafta Tatili) sayılır, 11 saatlik standart ücret hakedilir
+          // GELECEKTEKİ günler için kafadan para yazılmaz / kesilmez!
+          // Sadece geçmişte kalan veya bugünkü hafta sonları için HS sayılır
+          if (d.isWeekend && d.isPastOrToday) {
             totalEarned += defaultDaily;
             totalHours += 11;
             daysAttended += 1;

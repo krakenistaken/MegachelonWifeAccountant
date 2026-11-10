@@ -451,7 +451,8 @@ export default function SalariesPage() {
           let updatedIsPaid = rec.is_paid;
           let updatedHours = rec.work_hours ?? 11;
 
-          const dObj = new Date(selectedDate);
+          const dParts = selectedDate.split('-').map(Number);
+          const dObj = new Date(dParts[0], dParts[1] - 1, dParts[2]);
           const isSaturday = dObj.getDay() === 6;
           const isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
 
@@ -583,22 +584,24 @@ export default function SalariesPage() {
           let calculatedWage = 0;
           let newStatus = rec.status;
 
-          const dObj = new Date(selectedDate);
+          const dParts = selectedDate.split('-').map(Number);
+          const dObj = new Date(dParts[0], dParts[1] - 1, dParts[2]);
           const isSaturday = dObj.getDay() === 6;
+          const isWeekend = dObj.getDay() === 0 || dObj.getDay() === 6;
 
           if (hours === 0) {
             newStatus = 'Gelmedi';
             calculatedWage = 0;
           } else if (rec.status === 'Mesai') {
-            // Mesai seçiliyken: Cumartesi ise standart 11 saat ücreti + mesai saatleri bedeli
-            if (isSaturday) {
+            // Mesai seçiliyken: Hafta sonu (Cumartesi/Pazar) ise standart 11 saat ücreti + mesai saatleri bedeli
+            if (isWeekend) {
               calculatedWage = Math.round((rec.default_daily_wage + (hours * hourlyRate * 1.5)) * 100) / 100;
             } else {
               calculatedWage = Math.round(hours * (hourlyRate * 1.5) * 100) / 100;
             }
           } else if (hours > 11) {
             newStatus = 'Mesai';
-            if (isSaturday) {
+            if (isWeekend) {
               calculatedWage = Math.round((rec.default_daily_wage + (hours * hourlyRate * 1.5)) * 100) / 100;
             } else {
               calculatedWage = Math.round(hours * (hourlyRate * 1.5) * 100) / 100;
@@ -733,7 +736,7 @@ export default function SalariesPage() {
       const recordsToSave = localRecords.map((r) => ({
         employee_id: r.employee_id,
         status: r.status,
-        work_hours: r.work_hours ?? (r.status === 'Gelmedi' ? 0 : r.status === 'Mesai' ? 16.5 : r.status === 'Yarım Gün' ? 5.5 : 11),
+        work_hours: r.work_hours ?? (r.status === 'Gelmedi' ? 0 : 11),
         daily_wage: r.daily_wage,
         is_paid:
           (r.status === 'Geldi' || r.status === 'Yarım Gün' || r.status === 'Mesai') &&

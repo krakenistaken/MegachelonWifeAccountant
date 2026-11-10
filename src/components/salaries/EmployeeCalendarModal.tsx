@@ -1050,12 +1050,13 @@ export default function EmployeeCalendarModal({
                     onClick={() => {
                       const hourlyRate = employee.daily_wage > 0 ? employee.daily_wage / 11 : 0;
                       const hrs = dayForm.work_hours > 0 ? dayForm.work_hours : 11;
-                      const dObj = selectedDayDate ? new Date(selectedDayDate) : null;
-                      const isSat = dObj?.getDay() === 6;
+                      const dParts = selectedDayDate ? selectedDayDate.split('-').map(Number) : null;
+                      const dObj = dParts ? new Date(dParts[0], dParts[1] - 1, dParts[2]) : null;
+                      const isWeekend = dObj ? (dObj.getDay() === 0 || dObj.getDay() === 6) : false;
 
-                      // Cumartesi mesaisi: 11 saatlik standart ücretin üzerine ek mesai bedeli
+                      // Hafta sonu mesaisi: 11 saatlik standart ücretin üzerine ek mesai bedeli
                       let mesaiWage = 0;
-                      if (isSat) {
+                      if (isWeekend) {
                         mesaiWage = Math.round((employee.daily_wage + (hrs * hourlyRate * 1.5)) * 100) / 100;
                       } else {
                         mesaiWage = Math.round(hrs * (hourlyRate * 1.5) * 100) / 100;
@@ -1141,13 +1142,14 @@ export default function EmployeeCalendarModal({
                       onChange={(e) => {
                         const hrs = Math.max(0, parseFloat(e.target.value) || 0);
                         const hourlyRate = employee.daily_wage > 0 ? employee.daily_wage / 11 : 0;
-                        const dObj = selectedDayDate ? new Date(selectedDayDate) : null;
-                        const isSat = dObj?.getDay() === 6;
+                        const dParts = selectedDayDate ? selectedDayDate.split('-').map(Number) : null;
+                        const dObj = dParts ? new Date(dParts[0], dParts[1] - 1, dParts[2]) : null;
+                        const isWeekend = dObj ? (dObj.getDay() === 0 || dObj.getDay() === 6) : false;
 
                         let w = 0;
                         if (dayForm.status === 'Mesai') {
-                          if (isSat) {
-                            // Cumartesi mesaisi: standart günlük ücret + ek mesai saatleri bedeli
+                          if (isWeekend) {
+                            // Hafta sonu mesaisi: standart günlük ücret + ek mesai saatleri bedeli
                             w = Math.round((employee.daily_wage + (hrs * hourlyRate * 1.5)) * 100) / 100;
                           } else {
                             w = Math.round(hrs * (hourlyRate * 1.5) * 100) / 100;

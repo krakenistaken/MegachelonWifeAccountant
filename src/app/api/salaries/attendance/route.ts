@@ -269,7 +269,8 @@ export async function POST(request: NextRequest) {
           ? 'Gelmedi'
           : 'Geldi';
 
-      const dateObj = new Date(date);
+      const dParts = date.split('-').map(Number);
+      const dateObj = new Date(dParts[0], dParts[1] - 1, dParts[2]);
       const isWeekendDay = dateObj.getDay() === 0 || dateObj.getDay() === 6; // 0: Paz, 6: Cmt
       const isSaturday = dateObj.getDay() === 6;
 
@@ -290,8 +291,8 @@ export async function POST(request: NextRequest) {
       } else {
         if (status === 'Gelmedi') {
           effectiveWage = 0;
-        } else if (isSaturday && status === 'Mesai') {
-          // Cumartesi ek mesai: 11 saatlik standart ücretin üzerine mesai saati bedeli (saat * saatlik * 1.5)
+        } else if (isWeekendDay && status === 'Mesai') {
+          // Hafta sonu (Cumartesi / Pazar) ek mesai: 11 saatlik standart ücretin üzerine mesai saati bedeli (saat * saatlik * 1.5)
           effectiveWage = Math.round((defaultWage + (workHours * hourlyRate * 1.5)) * 100) / 100;
         } else if (status === 'Mesai') {
           effectiveWage = Math.round(workHours * (hourlyRate * 1.5) * 100) / 100;
